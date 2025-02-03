@@ -1,61 +1,45 @@
-//
-//  ContentView.swift
-//  SlopTok
-//
-//  Created by Gauntlet on 03/02/2025.
-//
-
 import SwiftUI
-import SwiftData
+import AVKit
+import FirebaseAuth
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
-
+    let videos = ["man", "skyline", "water"]
+    
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+        NavigationView {
+            ScrollView(.vertical, showsIndicators: false) {
+                LazyVStack(spacing: 0) {
+                    ForEach(videos, id: \.self) { video in
+                        LoopingVideoView(videoResource: video)
+                            .frame(width: UIScreen.main.bounds.width,
+                                   height: UIScreen.main.bounds.height)
+                            .clipped()
                     }
                 }
-                .onDelete(perform: deleteItems)
             }
+            .scrollTargetBehavior(.paging)
+            .ignoresSafeArea()
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
+                    Button(action: signOut) {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
                     }
                 }
             }
-        } detail: {
-            Text("Select an item")
         }
     }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
+    
+    func signOut() {
+        do {
+            try Auth.auth().signOut()
+        } catch {
+            print("Error signing out: \(error.localizedDescription)")
         }
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .preferredColorScheme(.dark)
 }

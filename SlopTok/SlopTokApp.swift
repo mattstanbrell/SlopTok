@@ -1,15 +1,18 @@
-//
-//  SlopTokApp.swift
-//  SlopTok
-//
-//  Created by Gauntlet on 03/02/2025.
-//
-
 import SwiftUI
 import SwiftData
+import FirebaseCore
+import GoogleSignIn
 
 @main
 struct SlopTokApp: App {
+    @StateObject private var authViewModel = AuthViewModel()
+    
+    init() {
+        FirebaseApp.configure()
+    }
+    
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             Item.self,
@@ -25,8 +28,20 @@ struct SlopTokApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            if authViewModel.isSignedIn {
+                ContentView()
+                    .modelContainer(sharedModelContainer)
+            } else {
+                AuthView()
+            }
         }
-        .modelContainer(sharedModelContainer)
+    }
+}
+
+class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ app: UIApplication,
+                    open url: URL,
+                    options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
+        return GIDSignIn.sharedInstance.handle(url)
     }
 }
