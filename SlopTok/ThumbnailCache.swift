@@ -2,7 +2,9 @@ import UIKit
 
 class ThumbnailCache {
     static let shared = ThumbnailCache()
-    private init() {}
+    private init() {
+        cache.countLimit = 100
+    }
     
     // NSCache automatically purges cached items on memory pressure
     private let cache = NSCache<NSString, UIImage>()

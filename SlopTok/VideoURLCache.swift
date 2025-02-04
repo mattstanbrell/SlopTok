@@ -4,12 +4,14 @@ import FirebaseStorage
 class VideoURLCache {
     static let shared = VideoURLCache()
     private init() {}
-    
-    private var cache: [String: URL] = [:]
-    
+
+    // Cache entry holds a URL and the time it was fetched.
+    private var cache: [String: (url: URL, date: Date)] = [:]
+
     func getVideoURL(for videoResource: String, completion: @escaping (URL?) -> Void) {
-        if let cachedURL = cache[videoResource] {
-            completion(cachedURL)
+        let now = Date()
+        if let cached = cache[videoResource], now.timeIntervalSince(cached.date) < 86400 {
+            completion(cached.url)
             return
         }
         
@@ -22,7 +24,15 @@ class VideoURLCache {
                 return
             }
             if let url = url {
-                self?.cache[videoResource] = url
+                self?.cache[videoResource] = (url, now)
+                // Enforce maximum cache limit of 1000 entries.
+                if let self = self, self.cache.count > 1000 {
+                    let sortedKeys = self.cache.sorted { $0.value.date < $1.value.date }.map { $0.key }
+                    let removeCount = self.cache.count - 1000
+                    for key in sortedKeys.prefix(removeCount) {
+                        self.cache.removeValue(forKey: key)
+                    }
+                }
                 completion(url)
             } else {
                 completion(nil)

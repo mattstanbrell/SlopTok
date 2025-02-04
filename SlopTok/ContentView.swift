@@ -3,7 +3,7 @@ import AVKit
 import FirebaseAuth
 
 struct ContentView: View {
-    let videos = ["man", "skyline", "water"]
+    let videos = ["man", "skyline", "water"]  // In a real app, there would be more entries.
     @State private var isDotExpanded = false
     @State private var scrollPosition: Int?
     @StateObject private var likesService = LikesService()
@@ -25,6 +25,23 @@ struct ContentView: View {
             let video = videos[position]
             withAnimation(.easeInOut(duration: 0.2)) {
                 currentVideoLiked = likesService.isLiked(videoId: video)
+            }
+        }
+    }
+    
+    // Preload next 5 videos starting from the current index.
+    private func preloadNextVideos(from index: Int) {
+        let total = videos.count
+        let maxIndex = min(index + 5, total - 1)
+        if maxIndex <= index { return }
+        for i in (index + 1)...maxIndex {
+            let resource = videos[i]
+            VideoURLCache.shared.getVideoURL(for: resource) { url in
+                if let url = url {
+                    VideoFileCache.shared.getLocalVideoURL(for: resource, remoteURL: url) { _ in
+                        // Preloaded video file.
+                    }
+                }
             }
         }
     }
@@ -71,6 +88,7 @@ struct ContentView: View {
             .scrollPosition(id: $scrollPosition)
             .onChange(of: scrollPosition) { newPosition in
                 updateCurrentVideoLikedStatus()
+                preloadNextVideos(from: newPosition ?? 0)
                 
                 if isDotExpanded {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
