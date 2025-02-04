@@ -73,7 +73,23 @@ struct ControlDotView: View {
         }
         .frame(width: isExpanded ? UIScreen.main.bounds.width - 32 : 16,
                height: isExpanded ? 40 : 16)
-        .background(backgroundColor)
+        .background(
+            Group {
+                if isExpanded {
+                    ZStack {
+                        dotColor.opacity(0.5)
+                    }
+                    .background(.regularMaterial)
+                    .blur(radius: 20)
+                } else {
+                    ZStack {
+                        dotColor.opacity(0.5)
+                    }
+                    .background(.regularMaterial)
+                    .blur(radius: 5)
+                }
+            }
+        )
         .clipShape(Capsule())
         .overlay(
             Group {
