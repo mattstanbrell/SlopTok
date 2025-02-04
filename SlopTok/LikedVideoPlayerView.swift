@@ -50,32 +50,47 @@ struct LikedVideoPlayerView: View {
     
     private var videoPlayerView: some View {
         ZStack(alignment: .top) {
-            ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(spacing: 0) {
-                    ForEach(videos) { video in
-                        ZStack {
-                            VideoPlayerCell(
-                                video: video,
-                                isCurrentVideo: video.index == currentIndex,
-                                onUnlike: { handleUnlike(video) },
-                                likesService: likesService
-                            )
-                            if isDotExpanded {
-                                Color.clear
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                            isDotExpanded = false
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(videos) { video in
+                            ZStack {
+                                VideoPlayerCell(
+                                    video: video,
+                                    isCurrentVideo: video.index == currentIndex,
+                                    onUnlike: { handleUnlike(video) },
+                                    likesService: likesService
+                                )
+                                if isDotExpanded {
+                                    Color.clear
+                                        .contentShape(Rectangle())
+                                        .onTapGesture {
+                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                                isDotExpanded = false
+                                            }
                                         }
-                                    }
+                                }
                             }
+                            .id(video.id)
+                        }
+                    }
+                    .scrollTargetLayout()
+                }
+                .scrollTargetBehavior(.paging)
+                .ignoresSafeArea()
+                .onAppear {
+                    if currentIndex < videos.count {
+                        proxy.scrollTo(videos[currentIndex].id, anchor: .center)
+                    }
+                }
+                .onChange(of: currentIndex) { newIndex in
+                    if newIndex < videos.count {
+                        withAnimation {
+                            proxy.scrollTo(videos[newIndex].id, anchor: .center)
                         }
                     }
                 }
-                .scrollTargetLayout()
             }
-            .scrollTargetBehavior(.paging)
-            .ignoresSafeArea()
             
             ControlDotView(
                 isExpanded: $isDotExpanded,

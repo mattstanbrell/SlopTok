@@ -77,6 +77,11 @@ struct BookmarkedVideoPlayerView: View {
                 }
                 .scrollTargetBehavior(.paging)
                 .ignoresSafeArea()
+                .onAppear {
+                    if currentIndex < videos.count {
+                        proxy.scrollTo(videos[currentIndex].id, anchor: .center)
+                    }
+                }
                 .onChange(of: currentIndex) { newIndex in
                     if newIndex < videos.count {
                         withAnimation {

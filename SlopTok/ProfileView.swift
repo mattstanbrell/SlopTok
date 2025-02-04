@@ -125,7 +125,7 @@ struct ProfileView: View {
 struct VideoSelection: Identifiable {
     let id = UUID()
     let videos: [LikedVideo]
-    let index: Int
+    let selectedVideoId: String
 }
 
 struct LikesGridView: View {
@@ -150,9 +150,10 @@ struct LikesGridView: View {
                             generateThumbnail(for: video.id)
                         }
                         .onTapGesture {
+                            let sortedVideos = likesService.likedVideos.sorted(by: { $0.timestamp > $1.timestamp })
                             videoPlayerSelection = VideoSelection(
-                                videos: Array(likesService.likedVideos),
-                                index: index
+                                videos: sortedVideos,
+                                selectedVideoId: video.id
                             )
                         }
                 }
@@ -160,11 +161,19 @@ struct LikesGridView: View {
             .padding(2) // Add padding around the entire grid
         }
         .fullScreenCover(item: $videoPlayerSelection) { selection in
-            LikedVideoPlayerView(
-                likedVideos: selection.videos,
-                initialIndex: selection.index,
-                likesService: likesService
-            )
+            if let index = selection.videos.firstIndex(where: { $0.id == selection.selectedVideoId }) {
+                LikedVideoPlayerView(
+                    likedVideos: selection.videos,
+                    initialIndex: index,
+                    likesService: likesService
+                )
+            } else {
+                LikedVideoPlayerView(
+                    likedVideos: selection.videos,
+                    initialIndex: 0,
+                    likesService: likesService
+                )
+            }
         }
     }
     

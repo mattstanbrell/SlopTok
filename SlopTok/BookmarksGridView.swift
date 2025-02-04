@@ -22,10 +22,10 @@ struct BookmarksGridView: View {
                             generateThumbnail(for: video.id)
                         }
                         .onTapGesture {
-                            // Create BookmarkVideoSelection once when tapped
+                            let sortedVideos = bookmarksService.bookmarkedVideos.sorted(by: { $0.timestamp > $1.timestamp })
                             videoPlayerSelection = BookmarkVideoSelection(
-                                videos: Array(bookmarksService.bookmarkedVideos),
-                                index: index
+                                videos: sortedVideos,
+                                selectedVideoId: video.id
                             )
                         }
                 }
@@ -35,11 +35,19 @@ struct BookmarksGridView: View {
             await bookmarksService.loadBookmarkedVideos()
         }
         .fullScreenCover(item: $videoPlayerSelection) { selection in
-            BookmarkedVideoPlayerView(
-                bookmarkedVideos: selection.videos,
-                initialIndex: selection.index,
-                bookmarksService: bookmarksService
-            )
+            if let index = selection.videos.firstIndex(where: { $0.id == selection.selectedVideoId }) {
+                BookmarkedVideoPlayerView(
+                    bookmarkedVideos: selection.videos,
+                    initialIndex: index,
+                    bookmarksService: bookmarksService
+                )
+            } else {
+                BookmarkedVideoPlayerView(
+                    bookmarkedVideos: selection.videos,
+                    initialIndex: 0,
+                    bookmarksService: bookmarksService
+                )
+            }
         }
     }
     
