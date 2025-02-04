@@ -46,6 +46,23 @@ struct BookmarkedVideoPlayerView: View {
         .task {
             await likesService.loadLikedVideos()
         }
+        .onChange(of: bookmarksService.bookmarkedVideos) { newBookmarks in
+            let newData = newBookmarks.enumerated().map { index, bookmark in
+                VideoPlayerData(id: bookmark.id, timestamp: bookmark.timestamp, index: index)
+            }
+            withAnimation(.easeInOut) {
+                videos = newData
+                if videos.isEmpty {
+                    currentIndex = 0
+                } else if currentIndex >= videos.count {
+                    currentIndex = max(0, videos.count - 1)
+                } else if let current = currentVideo, videos.first?.id != current.id {
+                    // If the most recent (top) bookmarked video has been removed,
+                    // animate scrolling to the new top video.
+                    currentIndex = 0
+                }
+            }
+        }
     }
 
     private var videoPlayerView: some View {
@@ -119,39 +136,8 @@ struct BookmarkedVideoPlayerView: View {
         )
     }
 
-    private func handleUnbookmark(_ video: VideoPlayerData) {
-        // Determine the next index to scroll to
-        let nextIndex: Int?
-        if video.index == videos.count - 1 {
-            // If removing the last video, scroll up
-            nextIndex = video.previous
-        } else {
-            // Otherwise, show next video at the same index
-            nextIndex = video.index
-        }
-
-        withAnimation {
-            // Remove the video from the local state
-            videos.removeAll { $0.id == video.id }
-
-            // Reindex remaining videos
-            for i in 0..<videos.count {
-                videos[i] = VideoPlayerData(
-                    id: videos[i].id,
-                    timestamp: videos[i].timestamp,
-                    index: i
-                )
-            }
-
-            // Update scroll position if available
-            if let next = nextIndex, next < videos.count {
-                currentIndex = next
-            } else if let next = nextIndex, next >= videos.count, next > 0 {
-                currentIndex = next - 1
-            }
-        }
-
-        // Then update Firestore
-        bookmarksService.toggleBookmark(videoId: video.id)
-    }
+private func handleUnbookmark(_ video: VideoPlayerData) {
+    // Simply toggle the bookmark in Firestore; the onChange handler will update the local state.
+    bookmarksService.toggleBookmark(videoId: video.id)
+}
 } 
