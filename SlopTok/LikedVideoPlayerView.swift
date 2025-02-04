@@ -55,7 +55,7 @@ struct LikedVideoPlayerView: View {
                     LazyVStack(spacing: 0) {
                         ForEach(videos) { video in
                             ZStack {
-                                VideoPlayerCell(
+                                LikedVideoPlayerCell(
                                     video: video,
                                     isCurrentVideo: video.index == currentIndex,
                                     onUnlike: { handleUnlike(video) },

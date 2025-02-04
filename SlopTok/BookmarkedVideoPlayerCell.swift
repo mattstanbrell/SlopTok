@@ -11,11 +11,11 @@ struct BookmarkedVideoPlayerCell: View {
         ZStack {
             LoopingVideoView(
                 videoResource: video.id,
-                onDoubleTapAction: {
-                    onUnbookmark()
-                },
                 likesService: likesService,
-                isVideoLiked: .constant(true)
+                isVideoLiked: Binding(
+                    get: { likesService.isLiked(videoId: video.id) },
+                    set: { _ in likesService.toggleLike(videoId: video.id) }
+                )
             )
         }
         .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)

@@ -1,7 +1,7 @@
 import SwiftUI
 import AVKit
 
-struct VideoPlayerCell: View {
+struct LikedVideoPlayerCell: View {
     let video: VideoPlayerData
     let isCurrentVideo: Bool
     let onUnlike: () -> Void
