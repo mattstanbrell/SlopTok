@@ -57,24 +57,23 @@ struct CommentView: View {
             
             Spacer(minLength: 16)
             
-            // Like button and count
-            VStack(alignment: .center, spacing: 4) {
-                Button(action: onLike) {
-                    Image(systemName: comment.isLikedByCurrentUser ? "heart.fill" : "heart")
-                        .font(.system(size: 12))
-                        .foregroundColor(comment.isLikedByCurrentUser ? .red : .gray)
-                }
-                
-                if comment.likeCount > 0 {
+            // Like button and count aligned to bottom
+            VStack {
+                Spacer()
+                HStack(spacing: 4) {
+                    Button(action: onLike) {
+                        Image(systemName: comment.isLikedByCurrentUser ? "heart.fill" : "heart")
+                            .font(.system(size: 12))
+                            .foregroundColor(comment.isLikedByCurrentUser ? .red : .gray)
+                    }
                     Text(formattedLikeCount)
                         .font(.system(size: 12))
                         .foregroundColor(.gray)
-                } else {
-                    Color.clear
-                        .frame(height: 15) // Maintain consistent height even when no likes
+                        .frame(width: 24, height: 15)
+                        .opacity(comment.likeCount > 0 ? 1 : 0)
                 }
             }
-            .frame(width: 24)
+            .frame(width: 24, alignment: .bottom)
         }
         .padding(.vertical, 8)
         .padding(.leading, indentationLevel > 0 ? 48 : 0)

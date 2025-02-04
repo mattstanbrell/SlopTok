@@ -1,6 +1,7 @@
 import SwiftUI
 import FirebaseAuth
 import AVKit
+import FirebaseStorage
 
 struct ProfileView: View {
     let userName: String
@@ -178,45 +179,13 @@ struct LikesGridView: View {
     }
     
     private func generateThumbnail(for videoId: String) {
-        guard thumbnails[videoId] == nil,
-              let videoURL = Bundle.main.url(forResource: videoId, withExtension: "mp4") else {
-            return
-        }
-        
-        let asset = AVAsset(url: videoURL)
-        let imageGenerator = AVAssetImageGenerator(asset: asset)
-        imageGenerator.appliesPreferredTrackTransform = true
-        
-        do {
-            let cgImage = try imageGenerator.copyCGImage(at: CMTime(seconds: 0.5, preferredTimescale: 60), actualTime: nil)
-            let thumbnail = UIImage(cgImage: cgImage)
-            thumbnails[videoId] = thumbnail
-        } catch {
-            print("Error generating thumbnail: \(error.localizedDescription)")
-        }
-    }
-}
-
-struct VideoThumbnail: View {
-    let videoId: String
-    let thumbnail: UIImage?
-    
-    var body: some View {
-        Group {
-            if let thumbnail = thumbnail {
-                Image(uiImage: thumbnail)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: UIScreen.main.bounds.width / 3 * 1.4) // Makes it slightly taller than wide
-                    .clipped()
-            } else {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: UIScreen.main.bounds.width / 3 * 1.4)
+        if thumbnails[videoId] != nil { return }
+        ThumbnailGenerator.generateThumbnail(for: videoId) { image in
+            if let image = image {
+                DispatchQueue.main.async {
+                    thumbnails[videoId] = image
+                }
             }
         }
-        .background(Color.black)
     }
 }

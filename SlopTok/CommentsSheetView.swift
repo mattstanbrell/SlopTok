@@ -45,9 +45,8 @@ struct CommentsSheetView: View {
             Text("\(formattedCommentCount) comments")
                 .font(.headline)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-            
-            Divider()
+                .padding(.vertical, 16)
+                .padding(.top, 8)
             
             if commentsService.isLoading {
                 ProgressView()

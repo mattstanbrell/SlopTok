@@ -45,7 +45,6 @@ struct ControlDotView: View {
                 Button(action: {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                         showComments = true
-                        isExpanded = false
                     }
                 }) {
                     Image(systemName: "bubble.left.fill")

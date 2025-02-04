@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import FirebaseStorage
 
 struct BookmarksGridView: View {
     @ObservedObject var bookmarksService: BookmarksService
@@ -51,22 +52,14 @@ struct BookmarksGridView: View {
         }
     }
     
-    private func generateThumbnail(for videoId: String) {
-        guard thumbnails[videoId] == nil,
-              let videoURL = Bundle.main.url(forResource: videoId, withExtension: "mp4") else {
-            return
-        }
-        
-        let asset = AVAsset(url: videoURL)
-        let imageGenerator = AVAssetImageGenerator(asset: asset)
-        imageGenerator.appliesPreferredTrackTransform = true
-        
-        do {
-            let cgImage = try imageGenerator.copyCGImage(at: CMTime(seconds: 0.5, preferredTimescale: 60), actualTime: nil)
-            let thumbnail = UIImage(cgImage: cgImage)
-            thumbnails[videoId] = thumbnail
-        } catch {
-            print("Error generating thumbnail: \(error.localizedDescription)")
+private func generateThumbnail(for videoId: String) {
+    if thumbnails[videoId] != nil { return }
+    ThumbnailGenerator.generateThumbnail(for: videoId) { image in
+        if let image = image {
+            DispatchQueue.main.async {
+                thumbnails[videoId] = image
+            }
         }
     }
+}
 } 

@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import FirebaseStorage
 
 struct LoopingVideoView: View {
     let videoResource: String
@@ -72,10 +73,19 @@ struct LoopingVideoView: View {
         )
     }
     
-    private func setupPlayer() {
-        if player == nil {
-            if let url = Bundle.main.url(forResource: videoResource, withExtension: "mp4") {
-                let playerItem = AVPlayerItem(url: url)
+private func setupPlayer() {
+    if player == nil {
+        VideoURLCache.shared.getVideoURL(for: videoResource) { remoteURL in
+            guard let remoteURL = remoteURL else {
+                print("Video URL is nil for resource: \(videoResource)")
+                return
+            }
+            VideoFileCache.shared.getLocalVideoURL(for: videoResource, remoteURL: remoteURL) { localURL in
+                guard let localURL = localURL else {
+                    print("Local video URL is nil for resource: \(videoResource)")
+                    return
+                }
+                let playerItem = AVPlayerItem(url: localURL)
                 let newPlayer = AVPlayer(playerItem: playerItem)
                 newPlayer.automaticallyWaitsToMinimizeStalling = false
                 newPlayer.actionAtItemEnd = .none
@@ -91,9 +101,12 @@ struct LoopingVideoView: View {
                     }
                 }
                 player = newPlayer
+                newPlayer.play()
+                isPlaying = true
             }
         }
     }
+}
     
     private func handleSingleTap(_ player: AVPlayer) {
         if isPlaying {
