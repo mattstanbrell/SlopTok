@@ -4,6 +4,7 @@ import FirebaseAuth
 struct ControlDotView: View {
     @Binding var isExpanded: Bool
     @State private var showProfile = false
+    @State private var showComments = false
     let userName: String
     let dotColor: Color  // This will be red when liked, white when not
     @ObservedObject var likesService: LikesService
@@ -36,6 +37,20 @@ struct ControlDotView: View {
                         .font(.system(size: 24))
                         .foregroundColor(.white)
                         .padding(.leading, 8)
+                }
+                
+                Spacer()
+                
+                // Comment button
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        showComments = true
+                        isExpanded = false
+                    }
+                }) {
+                    Image(systemName: "bubble.left.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(.white)
                 }
                 
                 Spacer()
@@ -79,6 +94,10 @@ struct ControlDotView: View {
         }
         .sheet(isPresented: $showProfile) {
             ProfileView(userName: userName, likesService: likesService)
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showComments) {
+            CommentsSheetView(videoId: currentVideoId)
                 .presentationDragIndicator(.visible)
         }
     }
