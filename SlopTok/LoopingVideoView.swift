@@ -7,36 +7,29 @@ struct LoopingVideoView: View {
     @State private var isPlaying = false
     @State private var wasUserPaused = false
     @State private var showPlayPauseIcon = false
-
+    @State private var showHeartIcon = false
+    @State private var heartOpacity = 0.0
+    @State private var heartColor = Color.white
+    @ObservedObject var likesService: LikesService
+    @Binding var isVideoLiked: Bool
+    
     var body: some View {
         ZStack {
             if let player = player {
                 VideoPlayer(player: player)
                     .scaledToFill()
                     .ignoresSafeArea()
-                    .overlay(Color.black.opacity(0.01))
-                    .onTapGesture {
-                        // Toggle play/pause on tap
-                        if isPlaying {
-                            player.pause()
-                            isPlaying = false
-                            wasUserPaused = true
-                        } else {
-                            player.play()
-                            isPlaying = true
-                            wasUserPaused = false
-                        }
-                        
-                        withAnimation(.easeIn(duration: 0.2)) {
-                            showPlayPauseIcon = true
-                        }
-                        
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                showPlayPauseIcon = false
+                    .overlay(
+                        Color.black.opacity(0.01)
+                            .allowsHitTesting(true)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                handleSingleTap(player)
                             }
-                        }
-                    }
+                            .onTapGesture(count: 2) {
+                                handleDoubleTap()
+                            }
+                    )
             } else {
                 Color.black.ignoresSafeArea()
             }
@@ -46,31 +39,15 @@ struct LoopingVideoView: View {
                     .font(.system(size: 50))
                     .foregroundColor(Color.white.opacity(0.8))
             }
+            
+            Image(systemName: "heart.fill")
+                .font(.system(size: 75))
+                .foregroundColor(heartColor)
+                .opacity(heartOpacity)
+                .animation(.easeOut(duration: 0.2), value: heartColor)
         }
         .onAppear {
-            // Initialize the player if not already set
-            if player == nil {
-                if let url = Bundle.main.url(forResource: videoResource, withExtension: "mp4") {
-                    let playerItem = AVPlayerItem(url: url)
-                    let newPlayer = AVPlayer(playerItem: playerItem)
-                    // Reduce delay for playback
-                    newPlayer.automaticallyWaitsToMinimizeStalling = false
-                    newPlayer.actionAtItemEnd = .none
-                    
-                    // Loop the video
-                    NotificationCenter.default.addObserver(
-                        forName: .AVPlayerItemDidPlayToEndTime,
-                        object: newPlayer.currentItem,
-                        queue: .main
-                    ) { _ in
-                        newPlayer.seek(to: .zero)
-                        if isPlaying {
-                            newPlayer.play()
-                        }
-                    }
-                    player = newPlayer
-                }
-            }
+            setupPlayer()
         }
         .background(
             GeometryReader { geometry in
@@ -78,7 +55,6 @@ struct LoopingVideoView: View {
                     .onAppear {
                         let frame = geometry.frame(in: .global)
                         let screen = UIScreen.main.bounds
-                        // Check if the view's center is within 50 points of the screen's center
                         let isActive = abs(frame.midY - screen.midY) < 50
                         updatePlayback(isActive: isActive)
                     }
@@ -91,21 +67,85 @@ struct LoopingVideoView: View {
         )
     }
     
+    private func setupPlayer() {
+        if player == nil {
+            if let url = Bundle.main.url(forResource: videoResource, withExtension: "mp4") {
+                let playerItem = AVPlayerItem(url: url)
+                let newPlayer = AVPlayer(playerItem: playerItem)
+                newPlayer.automaticallyWaitsToMinimizeStalling = false
+                newPlayer.actionAtItemEnd = .none
+                
+                NotificationCenter.default.addObserver(
+                    forName: .AVPlayerItemDidPlayToEndTime,
+                    object: newPlayer.currentItem,
+                    queue: .main
+                ) { _ in
+                    newPlayer.seek(to: .zero)
+                    if isPlaying {
+                        newPlayer.play()
+                    }
+                }
+                player = newPlayer
+            }
+        }
+    }
+    
+    private func handleSingleTap(_ player: AVPlayer) {
+        if isPlaying {
+            player.pause()
+            isPlaying = false
+            wasUserPaused = true
+        } else {
+            player.play()
+            isPlaying = true
+            wasUserPaused = false
+        }
+        
+        withAnimation(.easeIn(duration: 0.2)) {
+            showPlayPauseIcon = true
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            withAnimation(.easeOut(duration: 0.2)) {
+                showPlayPauseIcon = false
+            }
+        }
+    }
+    
+    private func handleDoubleTap() {
+        let isCurrentlyLiked = likesService.isLiked(videoId: videoResource)
+        likesService.toggleLike(videoId: videoResource)
+        isVideoLiked.toggle()
+        
+        // Show heart animation
+        heartColor = isCurrentlyLiked ? .white : .red
+        
+        // Quick fade in
+        withAnimation(.easeIn(duration: 0.1)) {
+            heartOpacity = 1.0
+        }
+        
+        // Slightly delayed fade out
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            withAnimation(.easeOut(duration: 0.2)) {
+                heartOpacity = 0.0
+            }
+        }
+    }
+    
     private func updatePlayback(isActive: Bool) {
         guard let player = player else { return }
         if isActive {
-            // When active, if not already playing, start or resume playback.
             if !isPlaying {
                 if wasUserPaused {
-                    player.play() // Resume from paused position
+                    player.play()
                 } else {
-                    player.seek(to: .zero) // Start from beginning
+                    player.seek(to: .zero)
                     player.play()
                 }
                 isPlaying = true
             }
         } else {
-            // When not active, pause the video.
             if isPlaying {
                 player.pause()
                 if !wasUserPaused {
