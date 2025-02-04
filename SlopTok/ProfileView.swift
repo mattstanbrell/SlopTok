@@ -6,6 +6,7 @@ struct ProfileView: View {
     let userName: String
     @ObservedObject var likesService: LikesService
     @State private var selectedTab = 0
+    @Environment(\.dismiss) private var dismiss
     
     var body: some View {
         NavigationView {
@@ -46,6 +47,23 @@ struct ProfileView: View {
             }
             .navigationTitle(userName)
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: signOut) {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                            .foregroundColor(.primary)
+                    }
+                }
+            }
+        }
+    }
+    
+    private func signOut() {
+        do {
+            try Auth.auth().signOut()
+            dismiss()
+        } catch {
+            print("Error signing out: \(error.localizedDescription)")
         }
     }
 }

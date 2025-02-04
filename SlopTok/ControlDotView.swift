@@ -14,22 +14,16 @@ struct ControlDotView: View {
                 Button(action: { showProfile = true }) {
                     Image(systemName: "person.circle.fill")
                         .font(.system(size: 24))
-                        .foregroundColor(dotColor)
+                        .foregroundColor(.white)
                         .padding(.leading, 8)
                 }
                 
                 Spacer()
-                
-                Button(action: signOut) {
-                    Image(systemName: "rectangle.portrait.and.arrow.right")
-                        .foregroundColor(dotColor)
-                }
-                .padding(.trailing, 8)
             }
         }
         .frame(width: isExpanded ? UIScreen.main.bounds.width - 32 : 12,
                height: isExpanded ? 40 : 12)
-        .background(dotColor.opacity(isExpanded ? 0.4 : 0.3))
+        .background(dotColor.opacity(isExpanded ? 0.3 : 0.2))
         .clipShape(Capsule())
         .padding(20)
         .contentShape(Rectangle())
@@ -41,14 +35,6 @@ struct ControlDotView: View {
         .sheet(isPresented: $showProfile) {
             ProfileView(userName: userName, likesService: likesService)
                 .presentationDragIndicator(.visible) // Shows the grab handle
-        }
-    }
-    
-    private func signOut() {
-        do {
-            try Auth.auth().signOut()
-        } catch {
-            print("Error signing out: \(error.localizedDescription)")
         }
     }
 }
