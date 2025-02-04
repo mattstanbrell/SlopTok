@@ -8,27 +8,46 @@ struct CommentsSheetView: View {
     @State private var replyingTo: Comment?
     @Environment(\.dismiss) private var dismiss
     
+    @ViewBuilder
+    private func commentThreadView(_ thread: CommentThread, indentationLevel: Int = 0) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CommentView(
+                comment: thread.comment,
+                onLike: { commentsService.toggleLike(commentId: thread.comment.id, videoId: videoId) },
+                onReply: { replyingTo = thread.comment },
+                onDelete: {
+                    commentsService.deleteComment(videoId: videoId, commentId: thread.comment.id)
+                },
+                indentationLevel: indentationLevel
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            
+            if !thread.replies.isEmpty {
+                ForEach(thread.replies) { reply in
+                    commentThreadView(reply, indentationLevel: 1)
+                }
+            }
+        }
+    }
+    
     var body: some View {
         NavigationView {
-            VStack {
+            VStack(spacing: 0) {
                 if commentsService.isLoading {
                     ProgressView()
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(commentsService.comments) { comment in
-                                CommentView(
-                                    comment: comment,
-                                    onLike: { commentsService.toggleLike(commentId: comment.id, videoId: videoId) },
-                                    onReply: { replyingTo = comment },
-                                    onDelete: {
-                                        commentsService.deleteComment(videoId: videoId, commentId: comment.id)
-                                    }
-                                )
-                                .padding(.horizontal)
-                                Divider()
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(commentsService.commentThreads) { thread in
+                                commentThreadView(thread)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                if thread.id != commentsService.commentThreads.last?.id {
+                                    Divider()
+                                }
                             }
                         }
+                        .padding(.horizontal)
+                        .padding(.top, 8)
                     }
                     
                     // Comment input area
@@ -48,8 +67,16 @@ struct CommentsSheetView: View {
                                 .clipShape(Circle())
                             }
                             
-                            TextField("Add a comment...", text: $newCommentText)
+                            TextField(replyingTo == nil ? "Add a comment..." : "Reply to \(replyingTo?.authorName ?? "")...",
+                                    text: $newCommentText)
                                 .textFieldStyle(RoundedBorderTextFieldStyle())
+                            
+                            if replyingTo != nil {
+                                Button(action: { replyingTo = nil }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.gray)
+                                }
+                            }
                             
                             Button(action: submitComment) {
                                 Text("Post")
@@ -64,29 +91,11 @@ struct CommentsSheetView: View {
             }
             .navigationTitle("Comments")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Close") {
-                        dismiss()
-                    }
-                }
-            }
         }
+        .presentationDetents([.height(UIScreen.main.bounds.height * 0.7)])
+        .presentationDragIndicator(.visible)
         .onAppear {
             commentsService.fetchComments(for: videoId)
-        }
-        .alert("Reply to \(replyingTo?.authorName ?? "")", isPresented: Binding(
-            get: { replyingTo != nil },
-            set: { if !$0 { replyingTo = nil } }
-        )) {
-            TextField("Your reply", text: $newCommentText)
-            Button("Cancel", role: .cancel) {
-                replyingTo = nil
-                newCommentText = ""
-            }
-            Button("Reply") {
-                submitComment()
-            }
         }
     }
     

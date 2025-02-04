@@ -2,11 +2,42 @@ import Foundation
 import FirebaseFirestore
 import FirebaseAuth
 
+struct CommentThread: Identifiable {
+    let id: String
+    let comment: Comment
+    var replies: [CommentThread]
+}
+
 class CommentsService: ObservableObject {
     private let db = Firestore.firestore()
-    @Published var comments: [Comment] = []
+    @Published var commentThreads: [CommentThread] = []
     @Published var isLoading = false
     @Published var error: Error?
+    
+    private func organizeIntoThreads(_ comments: [Comment]) -> [CommentThread] {
+        // First, create a dictionary of comments by their IDs
+        var commentsByParentId: [String?: [Comment]] = [:]
+        
+        // Group comments by their parent ID
+        for comment in comments {
+            commentsByParentId[comment.parentCommentId, default: []].append(comment)
+        }
+        
+        // Recursive function to build threads
+        func buildThreads(parentId: String?) -> [CommentThread] {
+            let children = commentsByParentId[parentId] ?? []
+            return children.map { comment in
+                CommentThread(
+                    id: comment.id,
+                    comment: comment,
+                    replies: buildThreads(parentId: comment.id)
+                )
+            }.sorted { $0.comment.timestamp > $1.comment.timestamp }
+        }
+        
+        // Build threads starting from top-level comments (parentId == nil)
+        return buildThreads(parentId: nil)
+    }
     
     func fetchComments(for videoId: String) {
         guard let currentUser = Auth.auth().currentUser else { return }
@@ -24,7 +55,7 @@ class CommentsService: ObservableObject {
                 }
                 
                 guard let documents = snapshot?.documents else {
-                    self.comments = []
+                    self.commentThreads = []
                     return
                 }
                 
@@ -50,7 +81,7 @@ class CommentsService: ObservableObject {
                     
                     // Update on main thread
                     await MainActor.run {
-                        self.comments = updatedComments
+                        self.commentThreads = self.organizeIntoThreads(updatedComments)
                     }
                 }
             }
