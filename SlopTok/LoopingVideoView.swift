@@ -6,11 +6,11 @@ struct LoopingVideoView: View {
     var onDoubleTapAction: (() -> Void)? = nil
     @State private var player: AVPlayer?
     @State private var isPlaying = false
-    @State private var wasUserPaused = false
     @State private var showPlayPauseIcon = false
     @State private var showHeartIcon = false
     @State private var heartOpacity = 0.0
     @State private var heartColor = Color.white
+    @State private var previousMidY: CGFloat = 0
     @ObservedObject var likesService: LikesService
     @Binding var isVideoLiked: Bool
     
@@ -56,13 +56,17 @@ struct LoopingVideoView: View {
                     .onAppear {
                         let frame = geometry.frame(in: .global)
                         let screen = UIScreen.main.bounds
+                        previousMidY = frame.midY
                         let isActive = abs(frame.midY - screen.midY) < 50
                         updatePlayback(isActive: isActive)
                     }
                     .onChange(of: geometry.frame(in: .global)) { newFrame in
                         let screen = UIScreen.main.bounds
-                        let isActive = abs(newFrame.midY - screen.midY) < 50
-                        updatePlayback(isActive: isActive)
+                        if abs(newFrame.midY - previousMidY) > 50 {
+                            let isActive = abs(newFrame.midY - screen.midY) < 50
+                            updatePlayback(isActive: isActive)
+                            previousMidY = newFrame.midY
+                        }
                     }
             }
         )
@@ -95,11 +99,9 @@ struct LoopingVideoView: View {
         if isPlaying {
             player.pause()
             isPlaying = false
-            wasUserPaused = true
         } else {
             player.play()
             isPlaying = true
-            wasUserPaused = false
         }
         
         withAnimation(.easeIn(duration: 0.2)) {
@@ -139,20 +141,14 @@ struct LoopingVideoView: View {
         guard let player = player else { return }
         if isActive {
             if !isPlaying {
-                if wasUserPaused {
-                    player.play()
-                } else {
-                    player.seek(to: .zero)
-                    player.play()
-                }
+                player.seek(to: .zero)
+                player.play()
                 isPlaying = true
             }
         } else {
             if isPlaying {
                 player.pause()
-                if !wasUserPaused {
-                    player.seek(to: .zero)
-                }
+                player.seek(to: .zero)
                 isPlaying = false
             }
         }
