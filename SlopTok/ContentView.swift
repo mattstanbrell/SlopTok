@@ -98,7 +98,8 @@ struct ContentView: View {
                 likesService: likesService,
                 bookmarksService: bookmarksService,
                 currentVideoId: currentVideoId,
-                onBookmarkAction: nil
+                onBookmarkAction: nil,
+                onProfileAction: nil
             )
             .padding(.top, 0)
             .frame(maxWidth: .infinity, alignment: .center)

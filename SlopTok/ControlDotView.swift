@@ -10,6 +10,7 @@ struct ControlDotView: View {
     @ObservedObject var bookmarksService: BookmarksService
     let currentVideoId: String
     let onBookmarkAction: (() -> Void)?  // New optional action for bookmark remover
+    let onProfileAction: (() -> Void)?
     
     private var backgroundColor: Color {
         dotColor.opacity(isExpanded ? 0.3 : 0.2)
@@ -22,7 +23,15 @@ struct ControlDotView: View {
     var body: some View {
         HStack {
             if isExpanded {
-                Button(action: { showProfile = true }) {
+                Button(action: {
+                    if let profileAction = onProfileAction {
+                        profileAction()
+                    } else {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            showProfile = true
+                        }
+                    }
+                }) {
                     Image(systemName: "person.circle.fill")
                         .font(.system(size: 24))
                         .foregroundColor(.white)

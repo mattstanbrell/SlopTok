@@ -99,7 +99,8 @@ struct LikedVideoPlayerView: View {
                 likesService: likesService,
                 bookmarksService: bookmarksService,
                 currentVideoId: currentVideo?.id ?? "",
-                onBookmarkAction: nil
+                onBookmarkAction: nil,
+                onProfileAction: { dismiss() }
             )
             .padding(.top, 0)
             .frame(maxWidth: .infinity, alignment: .center)

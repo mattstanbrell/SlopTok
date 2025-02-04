@@ -102,7 +102,8 @@ struct BookmarkedVideoPlayerView: View {
                     if let video = currentVideo {
                         handleUnbookmark(video)
                     }
-                }
+                },
+                onProfileAction: { dismiss() }
             )
             .padding(.top, 0)
             .frame(maxWidth: .infinity, alignment: .center)
