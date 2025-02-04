@@ -85,13 +85,28 @@ struct ProfileView: View {
                 .padding(.horizontal)
                 .padding(.top, 8)
                 
-                // Tab content with page style
+                // Tab content with page style using simplified GridView with defaults
                 TabView(selection: $selectedTab) {
-                    LikesGridView(likesService: likesService)
-                        .tag(0)
+                    GridView(videos: likesService.likedVideos) { sortedVideos, selectedVideoId in
+                        LikedVideoPlayerView(
+                            likedVideos: sortedVideos,
+                            initialIndex: sortedVideos.firstIndex(where: { $0.id == selectedVideoId }) ?? 0,
+                            likesService: likesService
+                        )
+                    }
+                    .tag(0)
                     
-                    BookmarksGridView(bookmarksService: bookmarksService)
-                        .tag(1)
+                    GridView(videos: bookmarksService.bookmarkedVideos) { sortedVideos, selectedVideoId in
+                        BookmarkedVideoPlayerView(
+                            bookmarkedVideos: sortedVideos,
+                            initialIndex: sortedVideos.firstIndex(where: { $0.id == selectedVideoId }) ?? 0,
+                            bookmarksService: bookmarksService
+                        )
+                    }
+                    .tag(1)
+                    .task {
+                        await bookmarksService.loadBookmarkedVideos()
+                    }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
             }
@@ -123,69 +138,4 @@ struct ProfileView: View {
 }
 
 // Model to hold a static snapshot of videos for the player
-struct VideoSelection: Identifiable {
-    let id = UUID()
-    let videos: [LikedVideo]
-    let selectedVideoId: String
-}
-
-struct LikesGridView: View {
-    @ObservedObject var likesService: LikesService
-    @State private var thumbnails: [String: UIImage] = [:]
-    @State private var selectedVideoIndex: Int? = nil
-    @State private var videoPlayerSelection: VideoSelection? = nil
-    
-    // Updated grid layout with spacing
-    let columns = [
-        GridItem(.flexible(), spacing: 2),
-        GridItem(.flexible(), spacing: 2),
-        GridItem(.flexible(), spacing: 2)
-    ]
-    
-    var body: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: 2) {
-                ForEach(Array(likesService.likedVideos.enumerated()), id: \.element.id) { index, video in
-                    VideoThumbnail(videoId: video.id, thumbnail: thumbnails[video.id])
-                        .onAppear {
-                            generateThumbnail(for: video.id)
-                        }
-                        .onTapGesture {
-                            let sortedVideos = likesService.likedVideos.sorted(by: { $0.timestamp > $1.timestamp })
-                            videoPlayerSelection = VideoSelection(
-                                videos: sortedVideos,
-                                selectedVideoId: video.id
-                            )
-                        }
-                }
-            }
-            .padding(2) // Add padding around the entire grid
-        }
-        .fullScreenCover(item: $videoPlayerSelection) { selection in
-            if let index = selection.videos.firstIndex(where: { $0.id == selection.selectedVideoId }) {
-                LikedVideoPlayerView(
-                    likedVideos: selection.videos,
-                    initialIndex: index,
-                    likesService: likesService
-                )
-            } else {
-                LikedVideoPlayerView(
-                    likedVideos: selection.videos,
-                    initialIndex: 0,
-                    likesService: likesService
-                )
-            }
-        }
-    }
-    
-    private func generateThumbnail(for videoId: String) {
-        if thumbnails[videoId] != nil { return }
-        ThumbnailGenerator.generateThumbnail(for: videoId) { image in
-            if let image = image {
-                DispatchQueue.main.async {
-                    thumbnails[videoId] = image
-                }
-            }
-        }
-    }
-}
+ 
