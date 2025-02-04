@@ -49,7 +49,7 @@ struct LikedVideoPlayerView: View {
     }
     
     private var videoPlayerView: some View {
-        ZStack(alignment: .top) {
+        ZStack(alignment: .bottom) {
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 0) {
@@ -102,7 +102,7 @@ struct LikedVideoPlayerView: View {
                 onBookmarkAction: nil,
                 onProfileAction: { dismiss() }
             )
-            .padding(.top, 0)
+            .padding(.bottom, 20)
             .frame(maxWidth: .infinity, alignment: .center)
             .zIndex(2)
         }

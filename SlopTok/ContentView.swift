@@ -30,7 +30,7 @@ struct ContentView: View {
     }
     
     var body: some View {
-        ZStack(alignment: .top) {
+        ZStack(alignment: .bottom) {
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 0) {
                     ForEach(Array(videos.enumerated()), id: \.offset) { index, video in
@@ -101,7 +101,7 @@ struct ContentView: View {
                 onBookmarkAction: nil,
                 onProfileAction: nil
             )
-            .padding(.top, 0)
+            .padding(.bottom, 20)
             .frame(maxWidth: .infinity, alignment: .center)
             .zIndex(2)
         }
