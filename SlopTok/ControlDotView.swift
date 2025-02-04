@@ -5,8 +5,19 @@ struct ControlDotView: View {
     @Binding var isExpanded: Bool
     @State private var showProfile = false
     let userName: String
-    let dotColor: Color
+    let dotColor: Color  // This will be red when liked, white when not
     @ObservedObject var likesService: LikesService
+    @ObservedObject var bookmarksService: BookmarksService
+    let currentVideoId: String
+    let onBookmarkAction: (() -> Void)?  // New optional action for bookmark remover
+    
+    private var backgroundColor: Color {
+        dotColor.opacity(isExpanded ? 0.3 : 0.2)
+    }
+    
+    private var showRing: Bool {
+        !isExpanded && bookmarksService.isBookmarked(videoId: currentVideoId)
+    }
     
     var body: some View {
         HStack {
@@ -19,12 +30,37 @@ struct ControlDotView: View {
                 }
                 
                 Spacer()
+                
+                Button(action: {
+                    if let action = onBookmarkAction {
+                        action()
+                    } else {
+                        bookmarksService.toggleBookmark(videoId: currentVideoId)
+                    }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        isExpanded = false
+                    }
+                }) {
+                    Image(systemName: "bookmark.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(bookmarksService.isBookmarked(videoId: currentVideoId) ? .yellow : .white)
+                        .padding(.trailing, 8)
+                }
             }
         }
-        .frame(width: isExpanded ? UIScreen.main.bounds.width - 32 : 12,
-               height: isExpanded ? 40 : 12)
-        .background(dotColor.opacity(isExpanded ? 0.3 : 0.2))
+        .frame(width: isExpanded ? UIScreen.main.bounds.width - 32 : 16,
+               height: isExpanded ? 40 : 16)
+        .background(backgroundColor)
         .clipShape(Capsule())
+        .overlay(
+            Group {
+                if showRing {
+                    Capsule()
+                        .stroke(Color.yellow.opacity(0.3), lineWidth: 1)
+                        .frame(width: 20, height: 20)
+                }
+            }
+        )
         .padding(20)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -34,7 +70,7 @@ struct ControlDotView: View {
         }
         .sheet(isPresented: $showProfile) {
             ProfileView(userName: userName, likesService: likesService)
-                .presentationDragIndicator(.visible) // Shows the grab handle
+                .presentationDragIndicator(.visible)
         }
     }
 }

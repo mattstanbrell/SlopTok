@@ -7,6 +7,7 @@ struct LikedVideoPlayerView: View {
     
     // Dependencies passed in
     let likesService: LikesService
+    @StateObject private var bookmarksService = BookmarksService()
     
     // Configuration
     let initialIndex: Int
@@ -42,6 +43,9 @@ struct LikedVideoPlayerView: View {
                 videoPlayerView
             }
         }
+        .task {
+            await bookmarksService.loadBookmarkedVideos()
+        }
     }
     
     private var videoPlayerView: some View {
@@ -49,12 +53,23 @@ struct LikedVideoPlayerView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 0) {
                     ForEach(videos) { video in
-                        VideoPlayerCell(
-                            video: video,
-                            isCurrentVideo: video.index == currentIndex,
-                            onUnlike: { handleUnlike(video) },
-                            likesService: likesService
-                        )
+                        ZStack {
+                            VideoPlayerCell(
+                                video: video,
+                                isCurrentVideo: video.index == currentIndex,
+                                onUnlike: { handleUnlike(video) },
+                                likesService: likesService
+                            )
+                            if isDotExpanded {
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                            isDotExpanded = false
+                                        }
+                                    }
+                            }
+                        }
                     }
                 }
                 .scrollTargetLayout()
@@ -66,7 +81,10 @@ struct LikedVideoPlayerView: View {
                 isExpanded: $isDotExpanded,
                 userName: Auth.auth().currentUser?.displayName ?? "User",
                 dotColor: .red,
-                likesService: likesService
+                likesService: likesService,
+                bookmarksService: bookmarksService,
+                currentVideoId: currentVideo?.id ?? "",
+                onBookmarkAction: nil
             )
             .padding(.top, 0)
             .frame(maxWidth: .infinity, alignment: .center)

@@ -3,6 +3,7 @@ import AVKit
 
 struct LoopingVideoView: View {
     let videoResource: String
+    var onDoubleTapAction: (() -> Void)? = nil
     @State private var player: AVPlayer?
     @State private var isPlaying = false
     @State private var wasUserPaused = false
@@ -113,22 +114,23 @@ struct LoopingVideoView: View {
     }
     
     private func handleDoubleTap() {
-        let isCurrentlyLiked = likesService.isLiked(videoId: videoResource)
-        likesService.toggleLike(videoId: videoResource)
-        isVideoLiked.toggle()
-        
-        // Show heart animation
-        heartColor = isCurrentlyLiked ? .white : .red
-        
-        // Quick fade in
-        withAnimation(.easeIn(duration: 0.1)) {
-            heartOpacity = 1.0
-        }
-        
-        // Slightly delayed fade out
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            withAnimation(.easeOut(duration: 0.2)) {
-                heartOpacity = 0.0
+        if let action = onDoubleTapAction {
+            action()
+        } else {
+            let isCurrentlyLiked = likesService.isLiked(videoId: videoResource)
+            likesService.toggleLike(videoId: videoResource)
+            isVideoLiked.toggle()
+            
+            heartColor = isCurrentlyLiked ? .white : .red
+            
+            withAnimation(.easeIn(duration: 0.1)) {
+                heartOpacity = 1.0
+            }
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    heartOpacity = 0.0
+                }
             }
         }
     }

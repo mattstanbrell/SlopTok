@@ -7,10 +7,16 @@ struct ContentView: View {
     @State private var isDotExpanded = false
     @State private var scrollPosition: Int?
     @StateObject private var likesService = LikesService()
+    @StateObject private var bookmarksService = BookmarksService()
     @State private var currentVideoLiked = false
     
     var userName: String {
         Auth.auth().currentUser?.displayName ?? "User"
+    }
+    
+    var currentVideoId: String {
+        let position = scrollPosition ?? 0
+        return position < videos.count ? videos[position] : videos[0]
     }
     
     private func updateCurrentVideoLikedStatus() {
@@ -74,14 +80,13 @@ struct ContentView: View {
             }
             .onReceive(likesService.$likedVideos) { _ in
                 if scrollPosition == nil {
-                    // Force check of initial video when likes first load
                     scrollPosition = 0
                 }
                 updateCurrentVideoLikedStatus()
             }
             .task {
-                // Make sure likes are loaded when view appears
                 await likesService.loadLikedVideos()
+                await bookmarksService.loadBookmarkedVideos()
                 updateCurrentVideoLikedStatus()
             }
             .zIndex(0)
@@ -90,7 +95,10 @@ struct ContentView: View {
                 isExpanded: $isDotExpanded,
                 userName: userName,
                 dotColor: currentVideoLiked ? .red : .white,
-                likesService: likesService
+                likesService: likesService,
+                bookmarksService: bookmarksService,
+                currentVideoId: currentVideoId,
+                onBookmarkAction: nil
             )
             .padding(.top, 0)
             .frame(maxWidth: .infinity, alignment: .center)
