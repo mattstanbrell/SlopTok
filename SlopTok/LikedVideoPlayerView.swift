@@ -1,84 +1,70 @@
 import SwiftUI
-import AVKit
 import FirebaseAuth
-import FirebaseFirestore
 
 struct LikedVideoPlayerView: View {
-    // Initial data passed in
-    let initialVideos: [LikedVideo]
-    let initialIndex: Int
-    let likesService: LikesService
+    // Environment
     @Environment(\.dismiss) private var dismiss
     
+    // Dependencies passed in
+    let likesService: LikesService
+    
+    // Configuration
+    let initialIndex: Int
+    
     // Local state
-    @State private var currentVideos: [LikedVideo]
-    @State private var scrollPosition: Int?
+    @State private var videos: [VideoPlayerData]
+    @State private var currentIndex: Int
     @State private var isDotExpanded = false
     
     init(likedVideos: [LikedVideo], initialIndex: Int, likesService: LikesService) {
-        self.initialVideos = likedVideos
-        self.initialIndex = initialIndex
         self.likesService = likesService
-        _currentVideos = State(initialValue: likedVideos)
-        _scrollPosition = State(initialValue: initialIndex)
+        self.initialIndex = initialIndex
+        
+        // Create initial video data with indices
+        let videoData = likedVideos.enumerated().map { index, video in
+            VideoPlayerData(id: video.id, timestamp: video.timestamp, index: index)
+        }
+        
+        // Initialize state
+        _videos = State(initialValue: videoData)
+        _currentIndex = State(initialValue: initialIndex)
     }
     
-    var userName: String {
-        Auth.auth().currentUser?.displayName ?? "User"
+    var currentVideo: VideoPlayerData? {
+        videos.first { $0.index == currentIndex }
     }
     
     var body: some View {
         Group {
-            if currentVideos.isEmpty {
-                Color.clear.onAppear {
-                    dismiss()
-                }
+            if videos.isEmpty {
+                Color.clear.onAppear { dismiss() }
             } else {
-                mainView
+                videoPlayerView
             }
         }
     }
     
-    private var mainView: some View {
+    private var videoPlayerView: some View {
         ZStack(alignment: .top) {
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 0) {
-                    ForEach(Array(currentVideos.enumerated()), id: \.element.id) { index, video in
-                        ZStack {
-                            LoopingVideoView(
-                                videoResource: video.id,
-                                likesService: likesService,
-                                isVideoLiked: Binding(
-                                    get: { currentVideos.contains(where: { $0.id == video.id }) },
-                                    set: { _ in handleUnlike(at: index) }
-                                )
-                            )
-                            
-                            if isDotExpanded {
-                                Color.clear
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                            isDotExpanded = false
-                                        }
-                                    }
-                            }
-                        }
-                        .frame(width: UIScreen.main.bounds.width,
-                               height: UIScreen.main.bounds.height)
-                        .clipped()
-                        .id(index)
+                    ForEach(videos) { video in
+                        VideoPlayerCell(
+                            video: video,
+                            isCurrentVideo: video.index == currentIndex,
+                            onUnlike: { handleUnlike(video) },
+                            likesService: likesService
+                        )
                     }
                 }
                 .scrollTargetLayout()
             }
             .scrollTargetBehavior(.paging)
             .ignoresSafeArea()
-            .scrollPosition(id: $scrollPosition)
             
             ControlDotView(
                 isExpanded: $isDotExpanded,
-                userName: userName,
+                userName: Auth.auth().currentUser?.displayName ?? "User",
                 dotColor: .red,
                 likesService: likesService
             )
@@ -96,52 +82,38 @@ struct LikedVideoPlayerView: View {
         )
     }
     
-    private func handleUnlike(at index: Int) {
-        guard index < currentVideos.count else { return }
-        let videoToUnlike = currentVideos[index]
-        let currentPosition = scrollPosition ?? 0
+    private func handleUnlike(_ video: VideoPlayerData) {
+        // First find where we should scroll to
+        let nextIndex: Int?
+        if video.index == videos.count - 1 {
+            // If unliking last video, scroll up
+            nextIndex = video.previous
+        } else {
+            // Otherwise stay at same position to show next video
+            nextIndex = video.index
+        }
         
-        // Update Firestore first
-        likesService.toggleLike(videoId: videoToUnlike.id)
-        
-        // Then handle local state updates
+        // Update local state first
         withAnimation {
             // Remove the video
-            currentVideos.remove(at: index)
+            videos.removeAll { $0.id == video.id }
             
-            if currentVideos.isEmpty {
-                // If no videos left, dismiss
-                dismiss()
-            } else {
-                // Adjust scroll position based on where we are
-                if currentVideos.count == 1 {
-                    // If only one video left, force scroll to it
-                    scrollPosition = 0
-                } else if index < currentPosition {
-                    // If we removed a video above current position,
-                    // adjust position to account for removed video
-                    scrollPosition = currentPosition - 1
-                } else if index == currentPosition {
-                    // If we removed current video and there are more below,
-                    // stay at same position to show next video
-                    if index == currentVideos.count {
-                        // Unless we're at the end, then scroll up
-                        scrollPosition = currentVideos.count - 1
-                    }
-                }
-                // If we removed a video below current position,
-                // no need to adjust scroll position
+            // Reindex remaining videos
+            for i in 0..<videos.count {
+                videos[i] = VideoPlayerData(
+                    id: videos[i].id,
+                    timestamp: videos[i].timestamp,
+                    index: i
+                )
+            }
+            
+            // Update scroll position
+            if let next = nextIndex {
+                currentIndex = next
             }
         }
-    }
-}
-
-// Model to represent a liked video with timestamp
-struct LikedVideo: Identifiable, Equatable {
-    let id: String
-    let timestamp: Date
-    
-    static func == (lhs: LikedVideo, rhs: LikedVideo) -> Bool {
-        lhs.id == rhs.id
+        
+        // Then update Firestore
+        likesService.toggleLike(videoId: video.id)
     }
 }
