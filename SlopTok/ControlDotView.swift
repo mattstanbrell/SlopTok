@@ -33,10 +33,22 @@ struct ControlDotView: View {
                         }
                     }
                 }) {
-                    Image(systemName: "person.circle.fill")
-                        .font(.system(size: 24))
+                    Image(systemName: "person")
+                        .font(.system(size: 18, weight: .medium))
                         .foregroundColor(.white)
+                        .frame(width: 36, height: 36)
+                        .background(
+                            ZStack {
+                                Circle()
+                                    .fill(.ultraThinMaterial)
+                                Circle()
+                                    .stroke(.white.opacity(0.15), lineWidth: 0.5)
+                            }
+                            .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
+                            .shadow(color: .white.opacity(0.2), radius: 3, x: 0, y: 0)
+                        )
                         .padding(.leading, 8)
+                        .padding(.vertical, 4)
                 }
                 
                 Spacer()
@@ -47,9 +59,21 @@ struct ControlDotView: View {
                         showComments = true
                     }
                 }) {
-                    Image(systemName: "bubble.left.fill")
-                        .font(.system(size: 20))
+                    Image(systemName: "bubble.left")
+                        .font(.system(size: 18, weight: .medium))
                         .foregroundColor(.white)
+                        .frame(width: 36, height: 36)
+                        .background(
+                            ZStack {
+                                Circle()
+                                    .fill(.ultraThinMaterial)
+                                Circle()
+                                    .stroke(.white.opacity(0.15), lineWidth: 0.5)
+                            }
+                            .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
+                            .shadow(color: .white.opacity(0.2), radius: 3, x: 0, y: 0)
+                        )
+                        .padding(.vertical, 4)
                 }
                 
                 Spacer()
@@ -64,26 +88,38 @@ struct ControlDotView: View {
                         isExpanded = false
                     }
                 }) {
-                    Image(systemName: "bookmark.fill")
-                        .font(.system(size: 20))
+                    Image(systemName: "bookmark")
+                        .font(.system(size: 18, weight: .medium))
                         .foregroundColor(bookmarksService.isBookmarked(videoId: currentVideoId) ? .yellow : .white)
+                        .frame(width: 36, height: 36)
+                        .background(
+                            ZStack {
+                                Circle()
+                                    .fill(.ultraThinMaterial)
+                                Circle()
+                                    .stroke(.white.opacity(0.15), lineWidth: 0.5)
+                            }
+                            .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
+                            .shadow(color: .white.opacity(0.2), radius: 3, x: 0, y: 0)
+                        )
                         .padding(.trailing, 8)
+                        .padding(.vertical, 4)
                 }
             }
         }
         .frame(width: isExpanded ? UIScreen.main.bounds.width - 32 : 16,
-               height: isExpanded ? 40 : 16)
+               height: isExpanded ? 48 : 16)
         .background(
             Group {
                 if isExpanded {
                     ZStack {
-                        dotColor.opacity(0.5)
+                        dotColor.opacity(0.4)
                     }
                     .background(.regularMaterial)
                     .blur(radius: 20)
                 } else {
                     ZStack {
-                        dotColor.opacity(0.5)
+                        dotColor.opacity(0.4)
                     }
                     .background(.regularMaterial)
                     .blur(radius: 5)
