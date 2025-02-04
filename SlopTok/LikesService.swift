@@ -4,7 +4,7 @@ import FirebaseAuth
 @MainActor
 class LikesService: ObservableObject {
     private let db = Firestore.firestore()
-    @Published var likedVideos: Set<String> = []
+    @Published var likedVideos: [LikedVideo] = []
     private var initialLoadCompleted = false
     
     init() {
@@ -16,26 +16,36 @@ class LikesService: ObservableObject {
     func loadLikedVideos() async {
         guard let userId = Auth.auth().currentUser?.uid else { return }
         
-        // First, get the initial data
         do {
             let snapshot = try await db.collection("users")
                 .document(userId)
                 .collection("likes")
+                .order(by: "timestamp", descending: true)
                 .getDocuments()
             
-            self.likedVideos = Set(snapshot.documents.map { $0.documentID })
+            self.likedVideos = snapshot.documents.compactMap { doc -> LikedVideo? in
+                guard let timestamp = doc.data()["timestamp"] as? Timestamp else {
+                    return nil
+                }
+                return LikedVideo(id: doc.documentID, timestamp: timestamp.dateValue())
+            }
             self.initialLoadCompleted = true
             
-            // Then set up the real-time listener
             db.collection("users")
                 .document(userId)
                 .collection("likes")
+                .order(by: "timestamp", descending: true)
                 .addSnapshotListener { [weak self] querySnapshot, error in
                     guard let self = self,
                           self.initialLoadCompleted,
                           let documents = querySnapshot?.documents else { return }
                     
-                    self.likedVideos = Set(documents.map { $0.documentID })
+                    self.likedVideos = documents.compactMap { doc -> LikedVideo? in
+                        guard let timestamp = doc.data()["timestamp"] as? Timestamp else {
+                            return nil
+                        }
+                        return LikedVideo(id: doc.documentID, timestamp: timestamp.dateValue())
+                    }
                 }
         } catch {
             print("Error loading likes: \(error.localizedDescription)")
@@ -49,7 +59,7 @@ class LikesService: ObservableObject {
             .collection("likes")
             .document(videoId)
         
-        if likedVideos.contains(videoId) {
+        if isLiked(videoId: videoId) {
             // Unlike
             likeRef.delete()
         } else {
@@ -59,6 +69,6 @@ class LikesService: ObservableObject {
     }
     
     func isLiked(videoId: String) -> Bool {
-        return likedVideos.contains(videoId)
+        return likedVideos.contains(where: { $0.id == videoId })
     }
 }

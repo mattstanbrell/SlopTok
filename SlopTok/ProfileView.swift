@@ -50,9 +50,18 @@ struct ProfileView: View {
     }
 }
 
+// Model to hold a static snapshot of videos for the player
+struct VideoSelection: Identifiable {
+    let id = UUID()
+    let videos: [LikedVideo]
+    let index: Int
+}
+
 struct LikesGridView: View {
     @ObservedObject var likesService: LikesService
     @State private var thumbnails: [String: UIImage] = [:]
+    @State private var selectedVideoIndex: Int? = nil
+    @State private var videoPlayerSelection: VideoSelection? = nil  // NEW: Separate state for player
     
     let columns = [
         GridItem(.flexible(), spacing: 1),
@@ -63,13 +72,27 @@ struct LikesGridView: View {
     var body: some View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 1) {
-                ForEach(Array(likesService.likedVideos).sorted(), id: \.self) { videoId in
-                    VideoThumbnail(videoId: videoId, thumbnail: thumbnails[videoId])
+                ForEach(Array(likesService.likedVideos.enumerated()), id: \.element.id) { index, video in
+                    VideoThumbnail(videoId: video.id, thumbnail: thumbnails[video.id])
                         .onAppear {
-                            generateThumbnail(for: videoId)
+                            generateThumbnail(for: video.id)
+                        }
+                        .onTapGesture {
+                            // Create VideoSelection once when tapped
+                            videoPlayerSelection = VideoSelection(
+                                videos: Array(likesService.likedVideos),
+                                index: index
+                            )
                         }
                 }
             }
+        }
+        .fullScreenCover(item: $videoPlayerSelection) { selection in
+            LikedVideoPlayerView(
+                likedVideos: selection.videos,
+                initialIndex: selection.index,
+                likesService: likesService
+            )
         }
     }
     
