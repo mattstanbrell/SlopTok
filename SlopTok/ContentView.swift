@@ -52,7 +52,7 @@ struct ContentView: View {
                 LazyVStack(spacing: 0) {
                     ForEach(Array(videos.enumerated()), id: \.offset) { index, video in
                         ZStack {
-                            LoopingVideoView(
+                            VideoPlayerView(
                                 videoResource: video,
                                 likesService: likesService,
                                 isVideoLiked: Binding(

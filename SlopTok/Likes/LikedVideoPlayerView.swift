@@ -13,7 +13,7 @@ struct LikedVideoPlayerView: View {
     let initialIndex: Int
     
     // Local state
-    @State private var videos: [VideoPlayerData]
+    @State private var videos: [VideoPlayerModel]
     @State private var currentIndex: Int
     @State private var isDotExpanded = false
     
@@ -23,7 +23,7 @@ struct LikedVideoPlayerView: View {
         
         // Create initial video data with indices
         let videoData = likedVideos.enumerated().map { index, video in
-            VideoPlayerData(id: video.id, timestamp: video.timestamp, index: index)
+            VideoPlayerModel(id: video.id, timestamp: video.timestamp, index: index)
         }
         
         // Initialize state
@@ -31,7 +31,7 @@ struct LikedVideoPlayerView: View {
         _currentIndex = State(initialValue: initialIndex)
     }
     
-    var currentVideo: VideoPlayerData? {
+    var currentVideo: VideoPlayerModel? {
         videos.first { $0.index == currentIndex }
     }
     
@@ -83,13 +83,6 @@ struct LikedVideoPlayerView: View {
                         proxy.scrollTo(videos[currentIndex].id, anchor: .center)
                     }
                 }
-                .onChange(of: currentIndex) { newIndex in
-                    if newIndex < videos.count {
-                        withAnimation {
-                            proxy.scrollTo(videos[newIndex].id, anchor: .center)
-                        }
-                    }
-                }
             }
             
             ControlDotView(
@@ -116,7 +109,7 @@ struct LikedVideoPlayerView: View {
         )
     }
     
-    private func handleUnlike(_ video: VideoPlayerData) {
+    private func handleUnlike(_ video: VideoPlayerModel) {
         // First find where we should scroll to
         let nextIndex: Int?
         if video.index == videos.count - 1 {
@@ -134,7 +127,7 @@ struct LikedVideoPlayerView: View {
             
             // Reindex remaining videos
             for i in 0..<videos.count {
-                videos[i] = VideoPlayerData(
+                videos[i] = VideoPlayerModel(
                     id: videos[i].id,
                     timestamp: videos[i].timestamp,
                     index: i

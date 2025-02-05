@@ -13,7 +13,7 @@ struct BookmarkedVideoPlayerView: View {
     let initialIndex: Int
 
     // Local state
-    @State private var videos: [VideoPlayerData]
+    @State private var videos: [VideoPlayerModel]
     @State private var currentIndex: Int
     @State private var isDotExpanded = false
 
@@ -23,7 +23,7 @@ struct BookmarkedVideoPlayerView: View {
 
         // Create initial video data with indices
         let videoData = bookmarkedVideos.enumerated().map { index, video in
-            VideoPlayerData(id: video.id, timestamp: video.timestamp, index: index)
+            VideoPlayerModel(id: video.id, timestamp: video.timestamp, index: index)
         }
 
         // Initialize state
@@ -31,7 +31,7 @@ struct BookmarkedVideoPlayerView: View {
         _currentIndex = State(initialValue: initialIndex)
     }
 
-    var currentVideo: VideoPlayerData? {
+    var currentVideo: VideoPlayerModel? {
         videos.first { $0.index == currentIndex }
     }
 
@@ -48,7 +48,7 @@ struct BookmarkedVideoPlayerView: View {
         }
         .onChange(of: bookmarksService.bookmarkedVideos) { newBookmarks in
             let newData = newBookmarks.enumerated().map { index, bookmark in
-                VideoPlayerData(id: bookmark.id, timestamp: bookmark.timestamp, index: index)
+                VideoPlayerModel(id: bookmark.id, timestamp: bookmark.timestamp, index: index)
             }
             withAnimation(.easeInOut) {
                 videos = newData
@@ -136,8 +136,8 @@ struct BookmarkedVideoPlayerView: View {
         )
     }
 
-private func handleUnbookmark(_ video: VideoPlayerData) {
-    // Simply toggle the bookmark in Firestore; the onChange handler will update the local state.
-    bookmarksService.toggleBookmark(videoId: video.id)
+    private func handleUnbookmark(_ video: VideoPlayerModel) {
+        // Simply toggle the bookmark in Firestore; the onChange handler will update the local state.
+        bookmarksService.toggleBookmark(videoId: video.id)
+    }
 }
-} 

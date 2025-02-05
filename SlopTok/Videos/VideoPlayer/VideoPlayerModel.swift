@@ -1,7 +1,7 @@
 import SwiftUI
 
 // VideoPlayerData.swift
-struct VideoPlayerData: Identifiable, Equatable {
+struct VideoPlayerModel: Identifiable, Equatable {
     let id: String        // Video ID
     let timestamp: Date   // When it was liked
     let index: Int        // Position in scroll list

@@ -1,24 +1,24 @@
 import SwiftUI
-import AVKit
 
 struct BookmarkedVideoPlayerCell: View {
-    let video: VideoPlayerData
+    let video: VideoPlayerModel
     let isCurrentVideo: Bool
     let onUnbookmark: () -> Void
-    let likesService: LikesService
+    @ObservedObject var likesService: LikesService
     
     var body: some View {
         ZStack {
-            LoopingVideoView(
+            VideoPlayerView(
                 videoResource: video.id,
                 likesService: likesService,
                 isVideoLiked: Binding(
                     get: { likesService.isLiked(videoId: video.id) },
-                    set: { _ in likesService.toggleLike(videoId: video.id) }
-                )
+                    set: { _ in }
+                ),
+                onDoubleTapAction: onUnbookmark
             )
         }
         .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
         .clipped()
     }
-} 
+}

@@ -2,20 +2,18 @@ import SwiftUI
 import AVKit
 
 struct LikedVideoPlayerCell: View {
-    let video: VideoPlayerData
+    let video: VideoPlayerModel
     let isCurrentVideo: Bool
     let onUnlike: () -> Void
-    let likesService: LikesService
+    @ObservedObject var likesService: LikesService
     
     var body: some View {
         ZStack {
-            LoopingVideoView(
+            VideoPlayerView(
                 videoResource: video.id,
                 likesService: likesService,
-                isVideoLiked: Binding(
-                    get: { true },
-                    set: { _ in onUnlike() }
-                )
+                isVideoLiked: .constant(true),  // Always true in liked videos view
+                onDoubleTapAction: onUnlike
             )
         }
         .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
