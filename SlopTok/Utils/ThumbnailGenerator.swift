@@ -1,9 +1,9 @@
-import UIKit
+import SwiftUI
 import AVFoundation
 
 class ThumbnailGenerator {
-    static func generateThumbnail(for videoId: String, completion: @escaping (UIImage?) -> Void) {
-        // First check ThumbnailCache
+    static func generateThumbnail(for videoId: String, completion: @escaping (Image?) -> Void) {
+        // First check ThumbnailCache (which now returns a SwiftUI.Image)
         if let cachedThumb = ThumbnailCache.shared.getThumbnail(for: videoId) {
             DispatchQueue.main.async {
                 completion(cachedThumb)
@@ -35,10 +35,12 @@ class ThumbnailGenerator {
                         imageGenerator.appliesPreferredTrackTransform = true
                         do {
                             let cgImage = try imageGenerator.copyCGImage(at: CMTime(seconds: 0.5, preferredTimescale: 60), actualTime: nil)
-                            let thumbnail = UIImage(cgImage: cgImage)
-                            ThumbnailCache.shared.setThumbnail(thumbnail, for: videoId)
+                            let thumbnailUIImage = UIImage(cgImage: cgImage)
+                            // Cache the thumbnail using the existing UIKit UIImage internally.
+                            ThumbnailCache.shared.setThumbnail(thumbnailUIImage, for: videoId)
+                            let thumbnailImage = Image(uiImage: thumbnailUIImage)
                             DispatchQueue.main.async {
-                                completion(thumbnail)
+                                completion(thumbnailImage)
                             }
                         } catch {
                             print("Error generating thumbnail: \(error.localizedDescription)")

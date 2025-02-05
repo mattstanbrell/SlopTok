@@ -1,40 +1,60 @@
 import Foundation
 import FirebaseStorage
 
+// Helper class to wrap cached video URL with the time it was fetched.
+class CachedVideoURL: NSObject {
+    let url: URL
+    let date: Date
+
+    init(url: URL, date: Date) {
+        self.url = url
+        self.date = date
+    }
+}
+
 class VideoURLCache {
     static let shared = VideoURLCache()
-    private init() {}
+    private init() {
+        // Limit cache to 1000 entries to prevent memory bloat.
+        cache.countLimit = 1000
+    }
 
-    // Cache entry holds a URL and the time it was fetched.
-    private var cache: [String: (url: URL, date: Date)] = [:]
-
+    // Using NSCache to allow automatic purging under memory pressure.
+    private let cache = NSCache<NSString, CachedVideoURL>()
+    
     func getVideoURL(for videoResource: String, completion: @escaping (URL?) -> Void) {
         let now = Date()
-        if let cached = cache[videoResource], now.timeIntervalSince(cached.date) < 86400 {
-            completion(cached.url)
-            return
+        let key = videoResource as NSString
+        
+        if let cachedEntry = cache.object(forKey: key) {
+            // Check if cached entry is fresh (less than 24 hours old)
+            if now.timeIntervalSince(cachedEntry.date) < 86400 {
+                VideoLogger.shared.log(.cacheHit, videoId: videoResource, message: "URL cache hit, age: \(Int(now.timeIntervalSince(cachedEntry.date)))s")
+                completion(cachedEntry.url)
+                return
+            } else {
+                // Remove expired entry
+                VideoLogger.shared.log(.cacheExpired, videoId: videoResource, message: "URL cache expired after \(Int(now.timeIntervalSince(cachedEntry.date)))s")
+                cache.removeObject(forKey: key)
+            }
         }
         
+        VideoLogger.shared.log(.cacheMiss, videoId: videoResource, message: "URL cache miss, fetching from storage")
         let storage = Storage.storage()
         let videoRef = storage.reference(withPath: "videos/\(videoResource).mp4")
         videoRef.downloadURL { [weak self] url, error in
             if let error = error {
-                print("Error fetching video URL for \(videoResource): \(error.localizedDescription)")
+                VideoLogger.shared.log(.downloadFailed, videoId: videoResource, message: "Failed to get download URL", error: error)
                 completion(nil)
                 return
             }
             if let url = url {
-                self?.cache[videoResource] = (url, now)
-                // Enforce maximum cache limit of 1000 entries.
-                if let self = self, self.cache.count > 1000 {
-                    let sortedKeys = self.cache.sorted { $0.value.date < $1.value.date }.map { $0.key }
-                    let removeCount = self.cache.count - 1000
-                    for key in sortedKeys.prefix(removeCount) {
-                        self.cache.removeValue(forKey: key)
-                    }
-                }
+                let cachedURL = CachedVideoURL(url: url, date: now)
+                self?.cache.setObject(cachedURL, forKey: key)
+                VideoLogger.shared.log(.downloadCompleted, videoId: videoResource, message: "Got and cached download URL")
                 completion(url)
             } else {
+                VideoLogger.shared.log(.downloadFailed, videoId: videoResource, message: "No download URL returned")
                 completion(nil)
             }
         }

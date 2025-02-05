@@ -25,7 +25,7 @@ struct GridView<T: VideoModel, FullScreenView: View>: View {
         self.fullscreenContent = fullscreenContent
     }
 
-    @State private var thumbnails: [String: UIImage] = [:]
+    @State private var thumbnails: [String: Image] = [:]
     @State private var selectedVideoId: String? = nil
 
     var body: some View {

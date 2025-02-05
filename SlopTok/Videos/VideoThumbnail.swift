@@ -2,12 +2,12 @@ import SwiftUI
 
 struct VideoThumbnail: View {
     let videoId: String
-    let thumbnail: UIImage?
+    let thumbnail: Image?
     
     var body: some View {
         Group {
             if let thumbnail = thumbnail {
-                Image(uiImage: thumbnail)
+                thumbnail
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(maxWidth: .infinity)

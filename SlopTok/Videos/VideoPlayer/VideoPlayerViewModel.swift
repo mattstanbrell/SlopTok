@@ -59,6 +59,8 @@ class VideoPlayerViewModel: ObservableObject {
                         newPlayer.automaticallyWaitsToMinimizeStalling = false
                         newPlayer.actionAtItemEnd = .none
                         
+                        VideoLogger.shared.log(.playerCreated, videoId: self.videoResource, message: "Creating AVPlayer")
+                        
                         NotificationCenter.default.addObserver(
                             forName: .AVPlayerItemDidPlayToEndTime,
                             object: newPlayer.currentItem,
@@ -120,10 +122,12 @@ class VideoPlayerViewModel: ObservableObject {
             player?.seek(to: .zero)
             player?.play()
             isPlaying = true
+            VideoLogger.shared.log(.playerStarted, videoId: videoResource, message: "Player started")
         } else {
             player?.pause()
             player?.seek(to: .zero)
             isPlaying = false
+            VideoLogger.shared.log(.playerPaused, videoId: videoResource, message: "Player paused")
         }
     }
 }

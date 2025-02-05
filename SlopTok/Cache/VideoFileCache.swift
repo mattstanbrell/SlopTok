@@ -3,8 +3,11 @@ import Foundation
 class VideoFileCache {
     static let shared = VideoFileCache()
     private init() {}
-    
-    private func localFileURL(for videoResource: String) -> URL {
+
+    // Duration threshold for cached files: 7 days (in seconds)
+    private let cacheExpiration: TimeInterval = 604800
+
+    func localFileURL(for videoResource: String) -> URL {
         let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
         return cachesDirectory.appendingPathComponent("\(videoResource).mp4")
     }
@@ -13,18 +16,34 @@ class VideoFileCache {
         let localURL = localFileURL(for: videoResource)
         let fileManager = FileManager.default
         
+        // Check if file exists and is not expired.
         if fileManager.fileExists(atPath: localURL.path) {
-            completion(localURL)
-            return
+            if let attributes = try? fileManager.attributesOfItem(atPath: localURL.path),
+               let modDate = attributes[.modificationDate] as? Date {
+                let now = Date()
+                if now.timeIntervalSince(modDate) < cacheExpiration {
+                    VideoLogger.shared.log(.cacheHit, videoId: videoResource, message: "Found cached video file")
+                    completion(localURL)
+                    return
+                } else {
+                    // File is expired; remove it.
+                    VideoLogger.shared.log(.cacheExpired, videoId: videoResource, message: "Cache expired after \(Int(now.timeIntervalSince(modDate))) seconds")
+                    try? fileManager.removeItem(at: localURL)
+                }
+            }
         }
+        
+        VideoLogger.shared.log(.cacheMiss, videoId: videoResource, message: "Starting download from \(remoteURL.lastPathComponent)")
+        VideoLogger.shared.log(.downloadStarted, videoId: videoResource)
         
         let task = URLSession.shared.downloadTask(with: remoteURL) { tempURL, response, error in
             if let error = error {
-                print("Error downloading video \(videoResource): \(error.localizedDescription)")
+                VideoLogger.shared.log(.downloadFailed, videoId: videoResource, error: error)
                 completion(remoteURL)
                 return
             }
             guard let tempURL = tempURL else {
+                VideoLogger.shared.log(.downloadFailed, videoId: videoResource, message: "No temporary URL provided")
                 completion(remoteURL)
                 return
             }
@@ -33,9 +52,10 @@ class VideoFileCache {
                     try fileManager.removeItem(at: localURL)
                 }
                 try fileManager.moveItem(at: tempURL, to: localURL)
+                VideoLogger.shared.log(.downloadCompleted, videoId: videoResource, message: "Cached at \(localURL.lastPathComponent)")
                 completion(localURL)
             } catch {
-                print("Error caching video \(videoResource): \(error.localizedDescription)")
+                VideoLogger.shared.log(.downloadFailed, videoId: videoResource, error: error)
                 completion(remoteURL)
             }
         }

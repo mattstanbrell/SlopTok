@@ -34,13 +34,33 @@ struct ContentView: View {
         let total = videos.count
         let maxIndex = min(index + 5, total - 1)
         if maxIndex <= index { return }
+        
+        VideoLogger.shared.log(.preloadStarted, videoId: "batch", message: "Preloading videos \(index + 1) to \(maxIndex)")
+        
         for i in (index + 1)...maxIndex {
             let resource = videos[i]
+            VideoLogger.shared.log(.preloadStarted, videoId: resource, message: "Starting preload")
+            
+            // First check if we have the video file cached
+            let localURL = VideoFileCache.shared.localFileURL(for: resource)
+            if FileManager.default.fileExists(atPath: localURL.path) {
+                VideoLogger.shared.log(.cacheHit, videoId: resource, message: "Found cached video file")
+                VideoLogger.shared.log(.preloadCompleted, videoId: resource, message: "Successfully preloaded")
+                continue
+            }
+            
+            // If not in file cache, get the URL and download
             VideoURLCache.shared.getVideoURL(for: resource) { url in
                 if let url = url {
-                    VideoFileCache.shared.getLocalVideoURL(for: resource, remoteURL: url) { _ in
-                        // Preloaded video file.
+                    VideoFileCache.shared.getLocalVideoURL(for: resource, remoteURL: url) { localURL in
+                        if localURL != nil {
+                            VideoLogger.shared.log(.preloadCompleted, videoId: resource, message: "Successfully preloaded")
+                        } else {
+                            VideoLogger.shared.log(.preloadFailed, videoId: resource, message: "Failed to get local URL")
+                        }
                     }
+                } else {
+                    VideoLogger.shared.log(.preloadFailed, videoId: resource, message: "Failed to get video URL")
                 }
             }
         }

@@ -16,6 +16,7 @@ class LikesService: ObservableObject {
     func loadLikedVideos() async {
         guard let userId = Auth.auth().currentUser?.uid else { return }
         
+        VideoLogger.shared.log(.likesLoaded, videoId: "", message: "Starting likes load")
         do {
             let snapshot = try await db.collection("users")
                 .document(userId)
@@ -23,32 +24,48 @@ class LikesService: ObservableObject {
                 .order(by: "timestamp", descending: true)
                 .getDocuments()
             
-            self.likedVideos = snapshot.documents.compactMap { doc -> LikedVideo? in
+            let documents = snapshot.documents
+            if documents.isEmpty {
+                VideoLogger.shared.log(.likesLoaded, videoId: "", message: "No likes found")
+                return
+            }
+            
+            self.likedVideos = documents.compactMap { doc -> LikedVideo? in
                 guard let timestamp = doc.data()["timestamp"] as? Timestamp else {
+                    VideoLogger.shared.log(.likesLoaded, videoId: "", message: "Failed to parse like document timestamp")
                     return nil
                 }
                 return LikedVideo(id: doc.documentID, timestamp: timestamp.dateValue())
             }
+            
             self.initialLoadCompleted = true
             
+            VideoLogger.shared.log(.likesLoaded, videoId: "", message: "Loaded \(likedVideos.count) likes")
+            
+            // Set up listener for real-time updates
             db.collection("users")
                 .document(userId)
                 .collection("likes")
                 .order(by: "timestamp", descending: true)
                 .addSnapshotListener { [weak self] querySnapshot, error in
                     guard let self = self,
-                          self.initialLoadCompleted,
-                          let documents = querySnapshot?.documents else { return }
+                          let documents = querySnapshot?.documents else {
+                        if let error = error {
+                            VideoLogger.shared.log(.likesLoaded, videoId: "", message: "Failed to listen for likes updates", error: error)
+                        }
+                        return
+                    }
                     
                     self.likedVideos = documents.compactMap { doc -> LikedVideo? in
                         guard let timestamp = doc.data()["timestamp"] as? Timestamp else {
+                            VideoLogger.shared.log(.likesLoaded, videoId: "", message: "Failed to parse like document timestamp")
                             return nil
                         }
                         return LikedVideo(id: doc.documentID, timestamp: timestamp.dateValue())
                     }
                 }
         } catch {
-            print("Error loading likes: \(error.localizedDescription)")
+            VideoLogger.shared.log(.likesLoaded, videoId: "", message: "Failed to load likes", error: error)
         }
     }
     
