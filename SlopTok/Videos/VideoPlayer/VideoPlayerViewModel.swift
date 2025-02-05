@@ -47,6 +47,7 @@ class VideoPlayerViewModel: ObservableObject {
                     print("Video URL is nil for resource: \(self?.videoResource ?? "")")
                     return
                 }
+                
                 VideoFileCache.shared.getLocalVideoURL(for: self.videoResource, remoteURL: remoteURL) { localURL in
                     guard let localURL = localURL else {
                         print("Local video URL is nil for resource: \(self.videoResource)")

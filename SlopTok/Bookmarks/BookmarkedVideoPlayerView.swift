@@ -31,113 +31,100 @@ struct BookmarkedVideoPlayerView: View {
         _currentIndex = State(initialValue: initialIndex)
     }
 
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            RemovableVideoFeed(
+                initialIndex: initialIndex,
+                handleRemovalLocally: false,  // Let onChange handler manage state
+                videos: $videos,
+                currentIndex: $currentIndex,
+                isDotExpanded: $isDotExpanded,
+                onRemove: { video in
+                    bookmarksService.toggleBookmark(videoId: video.id)
+                },
+                buildVideoCell: { video, isCurrent, onRemove in
+                    AnyView(
+                        BookmarkedVideoPlayerCell(
+                            video: video,
+                            isCurrentVideo: isCurrent,
+                            onUnbookmark: onRemove,
+                            likesService: likesService
+                        )
+                    )
+                },
+                buildControlDot: {
+                    AnyView(
+                        ControlDotView(
+                            isExpanded: $isDotExpanded,
+                            userName: Auth.auth().currentUser?.displayName ?? "User",
+                            dotColor: likesService.isLiked(videoId: currentVideo?.id ?? "") ? .red : .white,
+                            likesService: likesService,
+                            bookmarksService: bookmarksService,
+                            currentVideoId: currentVideo?.id ?? "",
+                            onBookmarkAction: {
+                                if let video = currentVideo {
+                                    bookmarksService.toggleBookmark(videoId: video.id)
+                                }
+                            },
+                            onProfileAction: { dismiss() }
+                        )
+                    )
+                }
+            )
+            .task {
+                await likesService.loadLikedVideos()
+            }
+            .onChange(of: bookmarksService.bookmarkedVideos) { newBookmarks in
+                let newData = newBookmarks.enumerated().map { index, bookmark in
+                    VideoPlayerModel(id: bookmark.id, timestamp: bookmark.timestamp, index: index)
+                }
+                withAnimation(.easeInOut) {
+                    videos = newData
+                    if videos.isEmpty {
+                        currentIndex = 0
+                    } else if currentIndex >= videos.count {
+                        currentIndex = max(0, videos.count - 1)
+                    } else if let current = currentVideo, videos.first?.id != current.id {
+                        // If the most recent (top) bookmarked video has been removed,
+                        // animate scrolling to the new top video.
+                        currentIndex = 0
+                    }
+                }
+            }
+            .onChange(of: currentIndex) { newIndex in
+                if newIndex < videos.count {
+                    preloadNextVideos(from: newIndex)
+                }
+            }
+            .task {
+                // Start preloading from the first video immediately
+                preloadNextVideos(from: currentIndex)
+            }
+        }
+    }
+
     var currentVideo: VideoPlayerModel? {
         videos.first { $0.index == currentIndex }
-    }
-
-    var body: some View {
-        Group {
-            if videos.isEmpty {
-                Color.clear.onAppear { dismiss() }
-            } else {
-                videoPlayerView
-            }
-        }
-        .task {
-            await likesService.loadLikedVideos()
-        }
-        .onChange(of: bookmarksService.bookmarkedVideos) { newBookmarks in
-            let newData = newBookmarks.enumerated().map { index, bookmark in
-                VideoPlayerModel(id: bookmark.id, timestamp: bookmark.timestamp, index: index)
-            }
-            withAnimation(.easeInOut) {
-                videos = newData
-                if videos.isEmpty {
-                    currentIndex = 0
-                } else if currentIndex >= videos.count {
-                    currentIndex = max(0, videos.count - 1)
-                } else if let current = currentVideo, videos.first?.id != current.id {
-                    // If the most recent (top) bookmarked video has been removed,
-                    // animate scrolling to the new top video.
-                    currentIndex = 0
-                }
-            }
-        }
-    }
-
-    private var videoPlayerView: some View {
-        ZStack(alignment: .bottom) {
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(videos, id: \.id) { video in
-                            ZStack {
-                                BookmarkedVideoPlayerCell(
-                                    video: video,
-                                    isCurrentVideo: video.index == currentIndex,
-                                    onUnbookmark: { handleUnbookmark(video) },
-                                    likesService: likesService
-                                )
-                                if isDotExpanded {
-                                    Color.clear
-                                        .contentShape(Rectangle())
-                                        .onTapGesture {
-                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                                isDotExpanded = false
-                                            }
-                                        }
-                                }
-                            }
-                        }
-                    }
-                    .scrollTargetLayout()
-                }
-                .scrollTargetBehavior(.paging)
-                .ignoresSafeArea()
-                .onAppear {
-                    if currentIndex < videos.count {
-                        proxy.scrollTo(videos[currentIndex].id, anchor: .center)
-                    }
-                }
-                .onChange(of: currentIndex) { newIndex in
-                    if newIndex < videos.count {
-                        withAnimation {
-                            proxy.scrollTo(videos[newIndex].id, anchor: .center)
-                        }
-                    }
-                }
-            }
-
-            ControlDotView(
-                isExpanded: $isDotExpanded,
-                userName: Auth.auth().currentUser?.displayName ?? "User",
-                dotColor: likesService.isLiked(videoId: currentVideo?.id ?? "") ? .red : .white,
-                likesService: likesService,
-                bookmarksService: bookmarksService,
-                currentVideoId: currentVideo?.id ?? "",
-                onBookmarkAction: {
-                    if let video = currentVideo {
-                        handleUnbookmark(video)
-                    }
-                },
-                onProfileAction: { dismiss() }
-            )
-            .padding(.bottom, 20)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .zIndex(2)
-        }
-        .gesture(
-            DragGesture()
-                .onEnded { gesture in
-                    if gesture.translation.width > 100 {
-                        dismiss()
-                    }
-                }
-        )
     }
 
     private func handleUnbookmark(_ video: VideoPlayerModel) {
         // Simply toggle the bookmark in Firestore; the onChange handler will update the local state.
         bookmarksService.toggleBookmark(videoId: video.id)
+    }
+
+    private func preloadNextVideos(from index: Int) {
+        let total = videos.count
+        let maxIndex = min(index + 5, total - 1)
+        if maxIndex <= index { return }
+        for i in (index + 1)...maxIndex {
+            let video = videos[i]
+            VideoURLCache.shared.getVideoURL(for: video.id) { url in
+                if let url = url {
+                    VideoFileCache.shared.getLocalVideoURL(for: video.id, remoteURL: url) { _ in
+                        // Preloaded video file.
+                    }
+                }
+            }
+        }
     }
 }

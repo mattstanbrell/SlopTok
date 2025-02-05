@@ -31,116 +31,87 @@ struct LikedVideoPlayerView: View {
         _currentIndex = State(initialValue: initialIndex)
     }
     
-    var currentVideo: VideoPlayerModel? {
-        videos.first { $0.index == currentIndex }
+    private func preloadNextVideos(from index: Int) {
+        let total = videos.count
+        let maxIndex = min(index + 5, total - 1)
+        if maxIndex <= index { return }
+        for i in (index + 1)...maxIndex {
+            let video = videos[i]
+            VideoURLCache.shared.getVideoURL(for: video.id) { url in
+                if let url = url {
+                    VideoFileCache.shared.getLocalVideoURL(for: video.id, remoteURL: url) { _ in
+                        // Preloaded video file.
+                    }
+                }
+            }
+        }
     }
     
     var body: some View {
-        Group {
-            if videos.isEmpty {
-                Color.clear.onAppear { dismiss() }
-            } else {
-                videoPlayerView
-            }
-        }
-        .task {
-            await bookmarksService.loadBookmarkedVideos()
-        }
-    }
-    
-    private var videoPlayerView: some View {
-        ZStack(alignment: .bottom) {
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(videos) { video in
-                            ZStack {
-                                LikedVideoPlayerCell(
-                                    video: video,
-                                    isCurrentVideo: video.index == currentIndex,
-                                    onUnlike: { handleUnlike(video) },
-                                    likesService: likesService
-                                )
-                                if isDotExpanded {
-                                    Color.clear
-                                        .contentShape(Rectangle())
-                                        .onTapGesture {
-                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                                isDotExpanded = false
-                                            }
-                                        }
-                                }
-                            }
-                            .id(video.id)
-                        }
-                    }
-                    .scrollTargetLayout()
-                }
-                .scrollTargetBehavior(.paging)
-                .ignoresSafeArea()
-                .onAppear {
-                    if currentIndex < videos.count {
-                        proxy.scrollTo(videos[currentIndex].id, anchor: .center)
-                    }
-                }
-            }
-            
-            ControlDotView(
-                isExpanded: $isDotExpanded,
-                userName: Auth.auth().currentUser?.displayName ?? "User",
-                dotColor: .red,
-                likesService: likesService,
-                bookmarksService: bookmarksService,
-                currentVideoId: currentVideo?.id ?? "",
-                onBookmarkAction: nil,
-                onProfileAction: { dismiss() }
-            )
-            .padding(.bottom, 20)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .zIndex(2)
-        }
-        .gesture(
-            DragGesture()
-                .onEnded { gesture in
-                    if gesture.translation.width > 100 {
-                        dismiss()
-                    }
-                }
-        )
-    }
-    
-    private func handleUnlike(_ video: VideoPlayerModel) {
-        // First find where we should scroll to
-        let nextIndex: Int?
-        if video.index == videos.count - 1 {
-            // If unliking last video, scroll up
-            nextIndex = video.previous
-        } else {
-            // Otherwise stay at same position to show next video
-            nextIndex = video.index
-        }
-        
-        // Update local state first
-        withAnimation {
-            // Remove the video
-            videos.removeAll { $0.id == video.id }
-            
-            // Reindex remaining videos
-            for i in 0..<videos.count {
-                videos[i] = VideoPlayerModel(
-                    id: videos[i].id,
-                    timestamp: videos[i].timestamp,
-                    index: i
+        RemovableVideoFeed(
+            initialIndex: initialIndex,
+            handleRemovalLocally: true,
+            videos: $videos,
+            currentIndex: $currentIndex,
+            isDotExpanded: $isDotExpanded,
+            onRemove: { video in
+                likesService.toggleLike(videoId: video.id)
+            },
+            buildVideoCell: { video, isCurrent, onRemove in
+                AnyView(
+                    LikedVideoPlayerCell(
+                        video: video,
+                        isCurrentVideo: isCurrent,
+                        onUnlike: onRemove,
+                        likesService: likesService
+                    )
+                )
+            },
+            buildControlDot: {
+                AnyView(
+                    ControlDotView(
+                        isExpanded: $isDotExpanded,
+                        userName: Auth.auth().currentUser?.displayName ?? "User",
+                        dotColor: .red,
+                        likesService: likesService,
+                        bookmarksService: bookmarksService,
+                        currentVideoId: currentVideo?.id ?? "",
+                        onBookmarkAction: nil,
+                        onProfileAction: { dismiss() }
+                    )
                 )
             }
-            
-            // Update scroll position
-            if let next = nextIndex {
-                currentIndex = next
+        )
+        .task {
+            await bookmarksService.loadBookmarkedVideos()
+            // Start preloading from the first video immediately
+            preloadNextVideos(from: currentIndex)
+        }
+        .onChange(of: likesService.likedVideos) { newLikes in
+            let newData = newLikes.enumerated().map { index, like in
+                VideoPlayerModel(id: like.id, timestamp: like.timestamp, index: index)
+            }
+            withAnimation(.easeInOut) {
+                videos = newData
+                if videos.isEmpty {
+                    currentIndex = 0
+                } else if currentIndex >= videos.count {
+                    currentIndex = max(0, videos.count - 1)
+                } else if let current = currentVideo, videos.first?.id != current.id {
+                    // If the most recent (top) liked video has been removed,
+                    // animate scrolling to the new top video.
+                    currentIndex = 0
+                }
             }
         }
-        
-        // Then update Firestore
-        likesService.toggleLike(videoId: video.id)
+        .onChange(of: currentIndex) { newIndex in
+            if newIndex < videos.count {
+                preloadNextVideos(from: newIndex)
+            }
+        }
+    }
+    
+    var currentVideo: VideoPlayerModel? {
+        videos.first { $0.index == currentIndex }
     }
 }

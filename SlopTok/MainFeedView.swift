@@ -3,7 +3,7 @@ import AVKit
 import FirebaseAuth
 
 struct ContentView: View {
-    let videos = ["man", "skyline", "water"]  // In a real app, there would be more entries.
+    let videos = ["man", "skyline", "water", "IMG_0371"]  // In a real app, there would be more entries.
     @State private var isDotExpanded = false
     @State private var scrollPosition: Int?
     @StateObject private var likesService = LikesService()
@@ -106,6 +106,8 @@ struct ContentView: View {
                 await likesService.loadLikedVideos()
                 await bookmarksService.loadBookmarkedVideos()
                 updateCurrentVideoLikedStatus()
+                // Start preloading from the first video immediately
+                preloadNextVideos(from: 0)
             }
             .zIndex(0)
             
