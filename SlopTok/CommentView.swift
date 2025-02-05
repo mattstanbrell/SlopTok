@@ -7,6 +7,9 @@ struct CommentView: View {
     let onReply: () -> Void
     let onDelete: () -> Void
     let indentationLevel: Int
+    @State private var currentTime = Date()
+    
+    private let timer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
     
     private var formattedLikeCount: String {
         if comment.likeCount >= 1000 {
@@ -45,17 +48,18 @@ struct CommentView: View {
                     Text(comment.timestamp.timeAgo())
                         .font(.system(size: 13))
                         .foregroundColor(.gray)
+                        .id(currentTime) // Force refresh when currentTime changes
                     
                     Button(action: onReply) {
                         Text("Reply")
                             .font(.system(size: 13))
                             .foregroundColor(.gray)
                     }
+                    .buttonStyle(PlainButtonStyle())
                 }
                 .padding(.top, 4)
             }
-            
-            Spacer(minLength: 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
             
             // Like button and count aligned to bottom
             VStack {
@@ -66,6 +70,7 @@ struct CommentView: View {
                             .font(.system(size: 12))
                             .foregroundColor(comment.isLikedByCurrentUser ? .red : .gray)
                     }
+                    .buttonStyle(PlainButtonStyle())
                     Text(formattedLikeCount)
                         .font(.system(size: 12))
                         .foregroundColor(.gray)
@@ -77,12 +82,19 @@ struct CommentView: View {
         }
         .padding(.vertical, 8)
         .padding(.leading, indentationLevel > 0 ? 48 : 0)
+        .onReceive(timer) { _ in
+            currentTime = Date()
+        }
     }
 }
 
 // Helper extension for timestamp formatting
 extension Date {
     func timeAgo() -> String {
+        let seconds = Date().timeIntervalSince(self)
+        if seconds < 60 {
+            return "just now"
+        }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: self, relativeTo: Date())
