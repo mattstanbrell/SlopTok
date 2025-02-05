@@ -1,15 +1,5 @@
 import SwiftUI
 
-// Protocol for video models
-protocol VideoModel: Identifiable {
-    var id: String { get }
-    var timestamp: Date { get }
-}
-
-// Extend existing models to conform to VideoModel
-extension LikedVideo: VideoModel {}
-extension BookmarkedVideo: VideoModel {}
-
 // Allow String to be used as Identifiable for fullScreenCover
 extension String: Identifiable {
     public var id: String { self }
