@@ -53,11 +53,7 @@ class PlayerCache {
     }
     
     func getPlayer(for videoId: String) -> AVPlayer? {
-        let player = cache.object(forKey: videoId as NSString)?.player
-        if player != nil {
-            VideoLogger.shared.log(.cacheHit, videoId: videoId, message: "Found player in cache")
-        }
-        return player
+        return cache.object(forKey: videoId as NSString)?.player
     }
     
     func setPlayer(_ player: AVPlayer, for videoId: String) {

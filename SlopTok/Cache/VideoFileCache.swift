@@ -23,10 +23,7 @@ class VideoFileCache {
             let oldestId = lruList.removeFirst()
             let url = localFileURL(for: oldestId)
             try? FileManager.default.removeItem(at: url)
-            VideoLogger.shared.log(.cacheExpired, videoId: oldestId, message: "Evicted from LRU cache")
         }
-        
-        VideoLogger.shared.log(.cacheHit, videoId: videoId, message: "Updated LRU position")
     }
 
     // Direct LRU update without cache check
@@ -49,30 +46,23 @@ class VideoFileCache {
                let modDate = attributes[.modificationDate] as? Date {
                 let now = Date()
                 if now.timeIntervalSince(modDate) < cacheExpiration {
-                    VideoLogger.shared.log(.cacheHit, videoId: videoResource, message: "Found cached video file")
                     updateLRU(videoId: videoResource)  // Update LRU on cache hit
                     completion(localURL)
                     return
                 } else {
                     // File is expired; remove it
-                    VideoLogger.shared.log(.cacheExpired, videoId: videoResource, message: "Cache expired after \(Int(now.timeIntervalSince(modDate))) seconds")
                     try? fileManager.removeItem(at: localURL)
                     lruList.removeAll { $0 == videoResource }
                 }
             }
         }
         
-        VideoLogger.shared.log(.cacheMiss, videoId: videoResource, message: "Starting download from \(remoteURL.lastPathComponent)")
-        VideoLogger.shared.log(.downloadStarted, videoId: videoResource)
-        
         let task = URLSession.shared.downloadTask(with: remoteURL) { [weak self] tempURL, response, error in
             if let error = error {
-                VideoLogger.shared.log(.downloadFailed, videoId: videoResource, error: error)
                 completion(remoteURL)
                 return
             }
             guard let tempURL = tempURL else {
-                VideoLogger.shared.log(.downloadFailed, videoId: videoResource, message: "No temporary URL provided")
                 completion(remoteURL)
                 return
             }
@@ -81,12 +71,9 @@ class VideoFileCache {
                     try fileManager.removeItem(at: localURL)
                 }
                 try fileManager.moveItem(at: tempURL, to: localURL)
-                VideoLogger.shared.log(.downloadCompleted, videoId: videoResource)
-                
                 self?.updateLRU(videoId: videoResource)  // Update LRU after successful download
                 completion(localURL)
             } catch {
-                VideoLogger.shared.log(.downloadFailed, videoId: videoResource, error: error)
                 completion(remoteURL)
             }
         }

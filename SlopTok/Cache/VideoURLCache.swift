@@ -29,32 +29,26 @@ class VideoURLCache {
         if let cachedEntry = cache.object(forKey: key) {
             // Check if cached entry is fresh (less than 24 hours old)
             if now.timeIntervalSince(cachedEntry.date) < 86400 {
-                VideoLogger.shared.log(.cacheHit, videoId: videoResource, message: "URL cache hit, age: \(Int(now.timeIntervalSince(cachedEntry.date)))s")
                 completion(cachedEntry.url)
                 return
             } else {
                 // Remove expired entry
-                VideoLogger.shared.log(.cacheExpired, videoId: videoResource, message: "URL cache expired after \(Int(now.timeIntervalSince(cachedEntry.date)))s")
                 cache.removeObject(forKey: key)
             }
         }
         
-        VideoLogger.shared.log(.cacheMiss, videoId: videoResource, message: "URL cache miss, fetching from storage")
         let storage = Storage.storage()
         let videoRef = storage.reference(withPath: "videos/\(videoResource).mp4")
         videoRef.downloadURL { [weak self] url, error in
             if let error = error {
-                VideoLogger.shared.log(.downloadFailed, videoId: videoResource, message: "Failed to get download URL", error: error)
                 completion(nil)
                 return
             }
             if let url = url {
                 let cachedURL = CachedVideoURL(url: url, date: now)
                 self?.cache.setObject(cachedURL, forKey: key)
-                VideoLogger.shared.log(.downloadCompleted, videoId: videoResource, message: "Got and cached download URL")
                 completion(url)
             } else {
-                VideoLogger.shared.log(.downloadFailed, videoId: videoResource, message: "No download URL returned")
                 completion(nil)
             }
         }

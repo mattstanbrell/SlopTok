@@ -44,32 +44,23 @@ class VideoPlayerViewModel: ObservableObject {
         if player == nil {
             // First check if we have a preloaded player
             if let preloadedPlayer = PlayerCache.shared.getPlayer(for: videoResource) {
-                VideoLogger.shared.log(.playerStarted, videoId: videoResource, message: "Using preloaded player")
                 self.player = preloadedPlayer
-                return  // Don't remove from cache, we'll reuse it
+                return
             }
             
             // If no preloaded player, check file cache
             let localURL = VideoFileCache.shared.localFileURL(for: videoResource)
             if FileManager.default.fileExists(atPath: localURL.path) {
-                VideoLogger.shared.log(.cacheHit, videoId: videoResource, message: "Found cached video file")
                 createPlayer(with: localURL)
                 return
             }
             
             // Last resort: download the video
-            VideoLogger.shared.log(.cacheMiss, videoId: videoResource, message: "Video not cached, downloading")
             VideoURLCache.shared.getVideoURL(for: videoResource) { [weak self] remoteURL in
-                guard let self = self, let remoteURL = remoteURL else {
-                    VideoLogger.shared.log(.downloadFailed, videoId: self?.videoResource ?? "", message: "Failed to get video URL")
-                    return
-                }
+                guard let self = self, let remoteURL = remoteURL else { return }
                 
                 VideoFileCache.shared.getLocalVideoURL(for: self.videoResource, remoteURL: remoteURL) { localURL in
-                    guard let localURL = localURL else {
-                        VideoLogger.shared.log(.downloadFailed, videoId: self.videoResource, message: "Failed to get local URL")
-                        return
-                    }
+                    guard let localURL = localURL else { return }
                     DispatchQueue.main.async {
                         self.createPlayer(with: localURL)
                     }
@@ -84,7 +75,6 @@ class VideoPlayerViewModel: ObservableObject {
         newPlayer.automaticallyWaitsToMinimizeStalling = false
         newPlayer.actionAtItemEnd = .none
         self.player = newPlayer
-        VideoLogger.shared.log(.playerCreated, videoId: videoResource, message: "Created new player")
         
         NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
@@ -141,12 +131,10 @@ class VideoPlayerViewModel: ObservableObject {
             player?.seek(to: .zero)
             player?.play()
             isPlaying = true
-            VideoLogger.shared.log(.playerStarted, videoId: videoResource, message: "Player started")
         } else {
             player?.pause()
             player?.seek(to: .zero)
             isPlaying = false
-            VideoLogger.shared.log(.playerPaused, videoId: videoResource, message: "Player paused")
         }
     }
 }

@@ -59,7 +59,7 @@ struct ContentView: View {
         // Update player cache position tracking
         PlayerCache.shared.updatePosition(current: videos[index])
         
-        // Only log if we actually need to preload something
+        // Only proceed if we need to preload something
         var needsPreload = false
         for i in indicesToPreload {
             if !PlayerCache.shared.hasPlayer(for: videos[i]) {
@@ -70,21 +70,15 @@ struct ContentView: View {
         
         if !needsPreload { return }
         
-        VideoLogger.shared.log(.preloadStarted, videoId: "batch", 
-            message: "Preloading videos (1 above, 3 below) around index \(index)")
-        
         for i in indicesToPreload {
             let resource = videos[i]
             
             // Skip if already preloaded
             if PlayerCache.shared.hasPlayer(for: resource) { continue }
             
-            VideoLogger.shared.log(.preloadStarted, videoId: resource, message: "Starting preload")
-            
             // First check if we have the video file cached
             let localURL = VideoFileCache.shared.localFileURL(for: resource)
             if FileManager.default.fileExists(atPath: localURL.path) {
-                VideoLogger.shared.log(.cacheHit, videoId: resource, message: "Found cached video file")
                 createAndCachePlayer(for: resource, url: localURL)
                 continue
             }
@@ -95,12 +89,8 @@ struct ContentView: View {
                     VideoFileCache.shared.getLocalVideoURL(for: resource, remoteURL: url) { localURL in
                         if let localURL = localURL {
                             self.createAndCachePlayer(for: resource, url: localURL)
-                        } else {
-                            VideoLogger.shared.log(.preloadFailed, videoId: resource, message: "Failed to get local URL")
                         }
                     }
-                } else {
-                    VideoLogger.shared.log(.preloadFailed, videoId: resource, message: "Failed to get video URL")
                 }
             }
         }
@@ -110,7 +100,6 @@ struct ContentView: View {
         let player = AVPlayer(url: url)
         player.automaticallyWaitsToMinimizeStalling = false
         PlayerCache.shared.setPlayer(player, for: videoId)
-        VideoLogger.shared.log(.playerCreatedAndPreloadCompleted, videoId: videoId, message: "Created, cached, and preloaded player")
     }
     
     var body: some View {
