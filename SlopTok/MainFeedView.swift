@@ -9,6 +9,7 @@ struct ContentView: View {
     @StateObject private var likesService = LikesService()
     @StateObject private var bookmarksService = BookmarksService()
     @State private var currentVideoLiked = false
+    @State private var lastPreloadedIndex = -1  // Track last preload index
     
     var userName: String {
         Auth.auth().currentUser?.displayName ?? "User"
@@ -29,23 +30,62 @@ struct ContentView: View {
         }
     }
     
-    // Preload next 5 videos starting from the current index.
+    // Preload 1 video above and 3 below the current index
     private func preloadNextVideos(from index: Int) {
+        // Don't preload if we've already preloaded from this index
+        if index == lastPreloadedIndex { return }
+        lastPreloadedIndex = index
+        
         let total = videos.count
-        let maxIndex = min(index + 5, total - 1)
-        if maxIndex <= index { return }
         
-        VideoLogger.shared.log(.preloadStarted, videoId: "batch", message: "Preloading videos \(index + 1) to \(maxIndex)")
+        // Get indices to preload (1 above, 3 below)
+        var indicesToPreload = [Int]()
         
-        for i in (index + 1)...maxIndex {
+        // Add one above if possible
+        if index > 0 {
+            indicesToPreload.append(index - 1)
+        }
+        
+        // Add three below if possible
+        for i in 1...3 {
+            let nextIndex = index + i
+            if nextIndex < total {
+                indicesToPreload.append(nextIndex)
+            }
+        }
+        
+        if indicesToPreload.isEmpty { return }
+        
+        // Update player cache position tracking
+        PlayerCache.shared.updatePosition(current: videos[index])
+        
+        // Only log if we actually need to preload something
+        var needsPreload = false
+        for i in indicesToPreload {
+            if !PlayerCache.shared.hasPlayer(for: videos[i]) {
+                needsPreload = true
+                break
+            }
+        }
+        
+        if !needsPreload { return }
+        
+        VideoLogger.shared.log(.preloadStarted, videoId: "batch", 
+            message: "Preloading videos (1 above, 3 below) around index \(index)")
+        
+        for i in indicesToPreload {
             let resource = videos[i]
+            
+            // Skip if already preloaded
+            if PlayerCache.shared.hasPlayer(for: resource) { continue }
+            
             VideoLogger.shared.log(.preloadStarted, videoId: resource, message: "Starting preload")
             
             // First check if we have the video file cached
             let localURL = VideoFileCache.shared.localFileURL(for: resource)
             if FileManager.default.fileExists(atPath: localURL.path) {
                 VideoLogger.shared.log(.cacheHit, videoId: resource, message: "Found cached video file")
-                VideoLogger.shared.log(.preloadCompleted, videoId: resource, message: "Successfully preloaded")
+                createAndCachePlayer(for: resource, url: localURL)
                 continue
             }
             
@@ -53,8 +93,8 @@ struct ContentView: View {
             VideoURLCache.shared.getVideoURL(for: resource) { url in
                 if let url = url {
                     VideoFileCache.shared.getLocalVideoURL(for: resource, remoteURL: url) { localURL in
-                        if localURL != nil {
-                            VideoLogger.shared.log(.preloadCompleted, videoId: resource, message: "Successfully preloaded")
+                        if let localURL = localURL {
+                            self.createAndCachePlayer(for: resource, url: localURL)
                         } else {
                             VideoLogger.shared.log(.preloadFailed, videoId: resource, message: "Failed to get local URL")
                         }
@@ -64,6 +104,13 @@ struct ContentView: View {
                 }
             }
         }
+    }
+    
+    private func createAndCachePlayer(for videoId: String, url: URL) {
+        let player = AVPlayer(url: url)
+        player.automaticallyWaitsToMinimizeStalling = false
+        PlayerCache.shared.setPlayer(player, for: videoId)
+        VideoLogger.shared.log(.playerCreatedAndPreloadCompleted, videoId: videoId, message: "Created, cached, and preloaded player")
     }
     
     var body: some View {
@@ -107,8 +154,10 @@ struct ContentView: View {
             .ignoresSafeArea()
             .scrollPosition(id: $scrollPosition)
             .onChange(of: scrollPosition) { newPosition in
-                updateCurrentVideoLikedStatus()
-                preloadNextVideos(from: newPosition ?? 0)
+                if let position = newPosition {
+                    updateCurrentVideoLikedStatus()
+                    preloadNextVideos(from: position)
+                }
                 
                 if isDotExpanded {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {

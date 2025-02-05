@@ -42,39 +42,58 @@ class VideoPlayerViewModel: ObservableObject {
     
     func setupPlayer() {
         if player == nil {
+            // First check if we have a preloaded player
+            if let preloadedPlayer = PlayerCache.shared.getPlayer(for: videoResource) {
+                VideoLogger.shared.log(.playerStarted, videoId: videoResource, message: "Using preloaded player")
+                self.player = preloadedPlayer
+                return  // Don't remove from cache, we'll reuse it
+            }
+            
+            // If no preloaded player, check file cache
+            let localURL = VideoFileCache.shared.localFileURL(for: videoResource)
+            if FileManager.default.fileExists(atPath: localURL.path) {
+                VideoLogger.shared.log(.cacheHit, videoId: videoResource, message: "Found cached video file")
+                createPlayer(with: localURL)
+                return
+            }
+            
+            // Last resort: download the video
+            VideoLogger.shared.log(.cacheMiss, videoId: videoResource, message: "Video not cached, downloading")
             VideoURLCache.shared.getVideoURL(for: videoResource) { [weak self] remoteURL in
                 guard let self = self, let remoteURL = remoteURL else {
-                    print("Video URL is nil for resource: \(self?.videoResource ?? "")")
+                    VideoLogger.shared.log(.downloadFailed, videoId: self?.videoResource ?? "", message: "Failed to get video URL")
                     return
                 }
                 
                 VideoFileCache.shared.getLocalVideoURL(for: self.videoResource, remoteURL: remoteURL) { localURL in
                     guard let localURL = localURL else {
-                        print("Local video URL is nil for resource: \(self.videoResource)")
+                        VideoLogger.shared.log(.downloadFailed, videoId: self.videoResource, message: "Failed to get local URL")
                         return
                     }
                     DispatchQueue.main.async {
-                        let playerItem = AVPlayerItem(url: localURL)
-                        let newPlayer = AVPlayer(playerItem: playerItem)
-                        newPlayer.automaticallyWaitsToMinimizeStalling = false
-                        newPlayer.actionAtItemEnd = .none
-                        
-                        VideoLogger.shared.log(.playerCreated, videoId: self.videoResource, message: "Creating AVPlayer")
-                        
-                        NotificationCenter.default.addObserver(
-                            forName: .AVPlayerItemDidPlayToEndTime,
-                            object: newPlayer.currentItem,
-                            queue: .main
-                        ) { [weak self] _ in
-                            newPlayer.seek(to: .zero)
-                            if self?.isPlaying == true {
-                                newPlayer.play()
-                            }
-                        }
-                        
-                        self.player = newPlayer
+                        self.createPlayer(with: localURL)
                     }
                 }
+            }
+        }
+    }
+    
+    private func createPlayer(with url: URL) {
+        let playerItem = AVPlayerItem(url: url)
+        let newPlayer = AVPlayer(playerItem: playerItem)
+        newPlayer.automaticallyWaitsToMinimizeStalling = false
+        newPlayer.actionAtItemEnd = .none
+        self.player = newPlayer
+        VideoLogger.shared.log(.playerCreated, videoId: videoResource, message: "Created new player")
+        
+        NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: newPlayer.currentItem,
+            queue: .main
+        ) { [weak self] _ in
+            newPlayer.seek(to: .zero)
+            if self?.isPlaying == true {
+                newPlayer.play()
             }
         }
     }

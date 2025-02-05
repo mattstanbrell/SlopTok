@@ -16,6 +16,7 @@ enum VideoLogEvent: String {
     case playerFailed = "PLAYER_FAILED"
     case playerStarted = "PLAYER_STARTED"
     case playerPaused = "PLAYER_PAUSED"
+    case playerCreatedAndPreloadCompleted = "PLAYER_CREATED_AND_PRELOADED"
 }
 
 class VideoLogger {
