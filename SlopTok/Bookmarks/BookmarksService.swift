@@ -23,35 +23,43 @@ class BookmarksService: ObservableObject {
                 .order(by: "timestamp", descending: true)
                 .getDocuments()
             
-            self.bookmarkedVideos = snapshot.documents.compactMap { doc -> BookmarkedVideo? in
+            let documents = snapshot.documents
+            if documents.isEmpty {
+                return
+            }
+            
+            self.bookmarkedVideos = documents.compactMap { doc -> BookmarkedVideo? in
                 guard let timestamp = doc.data()["timestamp"] as? Timestamp else {
                     return nil
                 }
-                let folderId = doc.data()["folderId"] as? String
-                return BookmarkedVideo(id: doc.documentID, timestamp: timestamp.dateValue(), folderId: folderId)
+                return BookmarkedVideo(id: doc.documentID, timestamp: timestamp.dateValue())
             }
+            
             self.initialLoadCompleted = true
             
-            // Set up real-time listener
+            // Set up listener for real-time updates
             db.collection("users")
                 .document(userId)
                 .collection("bookmarks")
                 .order(by: "timestamp", descending: true)
                 .addSnapshotListener { [weak self] querySnapshot, error in
                     guard let self = self,
-                          self.initialLoadCompleted,
-                          let documents = querySnapshot?.documents else { return }
+                          let documents = querySnapshot?.documents else {
+                        if let error = error {
+                            return
+                        }
+                        return
+                    }
                     
                     self.bookmarkedVideos = documents.compactMap { doc -> BookmarkedVideo? in
                         guard let timestamp = doc.data()["timestamp"] as? Timestamp else {
                             return nil
                         }
-                        let folderId = doc.data()["folderId"] as? String
-                        return BookmarkedVideo(id: doc.documentID, timestamp: timestamp.dateValue(), folderId: folderId)
+                        return BookmarkedVideo(id: doc.documentID, timestamp: timestamp.dateValue())
                     }
                 }
         } catch {
-            print("Error loading bookmarks: \(error.localizedDescription)")
+            return
         }
     }
     
@@ -63,14 +71,11 @@ class BookmarksService: ObservableObject {
             .document(videoId)
         
         if isBookmarked(videoId: videoId) {
-            // Remove bookmark
+            // Unbookmark
             bookmarkRef.delete()
         } else {
-            // Add bookmark
-            bookmarkRef.setData([
-                "timestamp": FieldValue.serverTimestamp(),
-                "folderId": nil  // Will be set when folders are implemented
-            ])
+            // Bookmark
+            bookmarkRef.setData(["timestamp": FieldValue.serverTimestamp()])
         }
     }
     

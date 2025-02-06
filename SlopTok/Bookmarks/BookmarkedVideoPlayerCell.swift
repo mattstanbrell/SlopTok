@@ -1,4 +1,5 @@
 import SwiftUI
+import AVKit
 
 struct BookmarkedVideoPlayerCell: View {
     let video: VideoPlayerModel
@@ -11,10 +12,7 @@ struct BookmarkedVideoPlayerCell: View {
             VideoPlayerView(
                 videoResource: video.id,
                 likesService: likesService,
-                isVideoLiked: Binding(
-                    get: { likesService.isLiked(videoId: video.id) },
-                    set: { _ in }
-                ),
+                isVideoLiked: .constant(true),  // Always true in bookmarked videos view
                 onDoubleTapAction: onUnlike
             )
         }
