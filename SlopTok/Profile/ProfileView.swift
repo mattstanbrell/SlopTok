@@ -20,33 +20,7 @@ struct ProfileView: View {
                 // Profile Header
                 VStack(spacing: 20) {
                     // Avatar Image
-                    AsyncImage(url: userPhotoURL) { phase in
-                        switch phase {
-                        case .empty:
-                            Circle()
-                                .fill(Color.gray.opacity(0.3))
-                                .frame(width: 90, height: 90)
-                                .overlay {
-                                    ProgressView()
-                                }
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: 90, height: 90)
-                                .clipShape(Circle())
-                                .overlay(Circle().stroke(Color.gray.opacity(0.2), lineWidth: 1))
-                        case .failure(_):
-                            Image(systemName: "person.circle.fill")
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: 90, height: 90)
-                                .foregroundColor(.gray)
-                        @unknown default:
-                            EmptyView()
-                        }
-                    }
-                    .shadow(radius: 2)
+                    CachedAvatarView(size: 90)
                     
                     // Username
                     Text(userName)
