@@ -7,6 +7,7 @@ struct CommentView: View {
     let onReply: () -> Void
     let onDelete: () -> Void
     let indentationLevel: Int
+    let isReplyTarget: Bool
     @State private var currentTime = Date()
     
     private let timer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()

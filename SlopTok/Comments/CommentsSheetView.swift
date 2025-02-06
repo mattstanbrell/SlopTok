@@ -1,5 +1,6 @@
 import SwiftUI
 import FirebaseAuth
+import Combine
 
 struct CommentsSheetView: View {
     let videoId: String
@@ -7,7 +8,8 @@ struct CommentsSheetView: View {
     @State private var newCommentText = ""
     @State private var replyingTo: Comment?
     @Environment(\.dismiss) private var dismiss
-    
+    @FocusState private var isInputActive: Bool
+
     private var totalCommentCount: Int {
         var count = 0
         func countComments(_ threads: [CommentThread]) {
@@ -56,17 +58,31 @@ struct CommentsSheetView: View {
                         CommentView(
                             comment: comment,
                             onLike: { commentsService.toggleLike(commentId: comment.id, videoId: videoId) },
-                            onReply: { replyingTo = comment },
+                            onReply: { 
+                                replyingTo = comment
+                                isInputActive = true
+                            },
                             onDelete: {
                                 commentsService.deleteComment(videoId: videoId, commentId: comment.id)
                             },
-                            indentationLevel: indentationLevel
+                            indentationLevel: indentationLevel,
+                            isReplyTarget: replyingTo?.id == comment.id
                         )
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal)
                         .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
+                        .listRowBackground(replyingTo?.id == comment.id ? Color.pink.opacity(0.1) : Color.clear)
                         .listRowSeparator(.hidden)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if isInputActive {
+                                if replyingTo?.id == comment.id {
+                                    replyingTo = nil
+                                } else {
+                                    replyingTo = comment
+                                }
+                            }
+                        }
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             if comment.authorType == "user" && comment.authorId == Auth.auth().currentUser?.uid {
                                 Button(role: .destructive, action: {
@@ -79,6 +95,8 @@ struct CommentsSheetView: View {
                     }
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .scrollDisabled(commentsService.isLoading)
                 
                 // Comment input area
                 VStack(spacing: 0) {
@@ -100,6 +118,7 @@ struct CommentsSheetView: View {
                         TextField(replyingTo == nil ? "Add a comment..." : "Reply to \(replyingTo?.authorName ?? "")...",
                                 text: $newCommentText)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .focused($isInputActive)
                         
                         if replyingTo != nil {
                             Button(action: { replyingTo = nil }) {
@@ -109,8 +128,8 @@ struct CommentsSheetView: View {
                         }
                         
                         Button(action: submitComment) {
-                            Text("Post")
-                                .fontWeight(.semibold)
+                            Image(systemName: "paperplane.fill")
+                                .foregroundColor(newCommentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .gray : .blue)
                         }
                         .disabled(newCommentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
@@ -121,6 +140,7 @@ struct CommentsSheetView: View {
         }
         .presentationDetents([.height(UIScreen.main.bounds.height * 0.7)])
         .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(isInputActive)  // Prevent dismissal when keyboard is active
         .onAppear {
             commentsService.fetchComments(for: videoId)
         }
