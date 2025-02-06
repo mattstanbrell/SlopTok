@@ -24,10 +24,6 @@ class LikesService: ObservableObject {
                 .getDocuments()
             
             let documents = snapshot.documents
-            if documents.isEmpty {
-                return
-            }
-            
             self.likedVideos = documents.compactMap { doc -> LikedVideo? in
                 guard let timestamp = doc.data()["timestamp"] as? Timestamp else {
                     return nil

@@ -92,19 +92,27 @@ struct LikedVideoPlayerView: View {
             preloadNextVideos(from: currentIndex)
         }
         .onChange(of: likesService.likedVideos) { newLikes in
-            let newData = newLikes.enumerated().map { index, like in
-                VideoPlayerModel(id: like.id, timestamp: like.timestamp, index: index)
-            }
-            withAnimation(.easeInOut) {
-                videos = newData
-                if videos.isEmpty {
-                    currentIndex = 0
-                } else if currentIndex >= videos.count {
-                    currentIndex = max(0, videos.count - 1)
-                } else if let current = currentVideo, videos.first?.id != current.id {
-                    // If the most recent (top) liked video has been removed,
-                    // animate scrolling to the new top video.
-                    currentIndex = 0
+            print("🎬 [LikedVideoPlayerView] Likes changed - New count: \(newLikes.count)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                let newData = newLikes.enumerated().map { index, like in
+                    VideoPlayerModel(id: like.id, timestamp: like.timestamp, index: index)
+                }
+                print("🎬 [LikedVideoPlayerView] Created new video data with \(newData.count) videos (after delay)")
+                withAnimation(.easeInOut) {
+                    let oldCount = videos.count
+                    let oldIndex = currentIndex
+                    videos = newData
+                    print("🎬 [LikedVideoPlayerView] State update - Old count: \(oldCount), New count: \(videos.count), Old index: \(oldIndex), Current index: \(currentIndex)")
+                    if videos.isEmpty {
+                        currentIndex = 0
+                        dismiss()
+                    } else if currentIndex >= videos.count {
+                        currentIndex = max(0, videos.count - 1)
+                    } else if let current = currentVideo, videos.first?.id != current.id {
+                        // If the most recent (top) liked video has been removed,
+                        // animate scrolling to the new top video.
+                        currentIndex = 0
+                    }
                 }
             }
         }

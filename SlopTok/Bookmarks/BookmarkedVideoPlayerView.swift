@@ -18,6 +18,7 @@ struct BookmarkedVideoPlayerView: View {
     @State private var isDotExpanded = false
     
     init(bookmarkedVideos: [BookmarkedVideo], initialIndex: Int, bookmarksService: BookmarksService) {
+        print("🎬 [BookmarkedVideoPlayerView] Initializing with \(bookmarkedVideos.count) videos, initial index: \(initialIndex)")
         self.bookmarksService = bookmarksService
         self.initialIndex = initialIndex
         
@@ -25,6 +26,7 @@ struct BookmarkedVideoPlayerView: View {
         let videoData = bookmarkedVideos.enumerated().map { index, video in
             VideoPlayerModel(id: video.id, timestamp: video.timestamp, index: index)
         }
+        print("🎬 [BookmarkedVideoPlayerView] Created initial video data with \(videoData.count) videos")
         
         // Initialize state
         _videos = State(initialValue: videoData)
@@ -64,6 +66,7 @@ struct BookmarkedVideoPlayerView: View {
             currentIndex: $currentIndex,
             isDotExpanded: $isDotExpanded,
             onRemove: { video in
+                print("🎬 [BookmarkedVideoPlayerView] Removing video at index \(video.index)")
                 bookmarksService.toggleBookmark(videoId: video.id)
             },
             buildVideoCell: { video, isCurrent, onRemove in
@@ -101,16 +104,26 @@ struct BookmarkedVideoPlayerView: View {
             preloadNextVideos(from: currentIndex)
         }
         .onChange(of: bookmarksService.bookmarkedVideos) { newBookmarks in
-            let newData = newBookmarks.enumerated().map { index, bookmark in
-                VideoPlayerModel(id: bookmark.id, timestamp: bookmark.timestamp, index: index)
-            }
-            withAnimation(.easeInOut) {
-                videos = newData
-                if videos.isEmpty {
-                    currentIndex = 0
-                    dismiss()
-                } else if currentIndex >= videos.count {
-                    currentIndex = max(0, videos.count - 1)
+            print("🎬 [BookmarkedVideoPlayerView] Bookmarks changed - New count: \(newBookmarks.count)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                let newData = newBookmarks.enumerated().map { index, bookmark in
+                    VideoPlayerModel(id: bookmark.id, timestamp: bookmark.timestamp, index: index)
+                }
+                print("🎬 [BookmarkedVideoPlayerView] Created new video data with \(newData.count) videos (after delay)")
+                withAnimation(.easeInOut) {
+                    let oldCount = videos.count
+                    let oldIndex = currentIndex
+                    videos = newData
+                    print("🎬 [BookmarkedVideoPlayerView] State update - Old count: \(oldCount), New count: \(videos.count), Old index: \(oldIndex), Current index: \(currentIndex)")
+                    
+                    if videos.isEmpty {
+                        print("🎬 [BookmarkedVideoPlayerView] No videos left, dismissing")
+                        currentIndex = 0
+                        dismiss()
+                    } else if currentIndex >= videos.count {
+                        print("🎬 [BookmarkedVideoPlayerView] Current index out of bounds, adjusting to \(max(0, videos.count - 1))")
+                        currentIndex = max(0, videos.count - 1)
+                    }
                 }
             }
         }
