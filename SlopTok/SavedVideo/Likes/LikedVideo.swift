@@ -1,7 +1,7 @@
 import SwiftUI
 
 // Model to represent a liked video with timestamp
-struct LikedVideo: Identifiable, Equatable {
+struct LikedVideo: Identifiable, Equatable, SavedVideo {
     let id: String
     let timestamp: Date
     

@@ -2,33 +2,37 @@ import FirebaseFirestore
 import FirebaseAuth
 
 @MainActor
-class LikesService: ObservableObject {
+class SavedVideoService<T: SavedVideo>: ObservableObject {
     private let db = Firestore.firestore()
-    @Published var likedVideos: [LikedVideo] = []
+    @Published public var videos: [T] = []
     private var initialLoadCompleted = false
+    private let collectionName: String
+    private let createVideo: (String, Date) -> T
     
-    init() {
+    init(collectionName: String, createVideo: @escaping (String, Date) -> T) {
+        self.collectionName = collectionName
+        self.createVideo = createVideo
         Task {
-            await loadLikedVideos()
+            await loadVideos()
         }
     }
     
-    func loadLikedVideos() async {
+    func loadVideos() async {
         guard let userId = Auth.auth().currentUser?.uid else { return }
         
         do {
             let snapshot = try await db.collection("users")
                 .document(userId)
-                .collection("likes")
+                .collection(collectionName)
                 .order(by: "timestamp", descending: true)
                 .getDocuments()
             
             let documents = snapshot.documents
-            self.likedVideos = documents.compactMap { doc -> LikedVideo? in
+            self.videos = documents.compactMap { [self] doc -> T? in
                 guard let timestamp = doc.data()["timestamp"] as? Timestamp else {
                     return nil
                 }
-                return LikedVideo(id: doc.documentID, timestamp: timestamp.dateValue())
+                return self.createVideo(doc.documentID, timestamp.dateValue())
             }
             
             self.initialLoadCompleted = true
@@ -36,7 +40,7 @@ class LikesService: ObservableObject {
             // Set up listener for real-time updates
             db.collection("users")
                 .document(userId)
-                .collection("likes")
+                .collection(collectionName)
                 .order(by: "timestamp", descending: true)
                 .addSnapshotListener { [weak self] querySnapshot, error in
                     guard let self = self,
@@ -47,11 +51,11 @@ class LikesService: ObservableObject {
                         return
                     }
                     
-                    self.likedVideos = documents.compactMap { doc -> LikedVideo? in
+                    self.videos = documents.compactMap { [self] doc -> T? in
                         guard let timestamp = doc.data()["timestamp"] as? Timestamp else {
                             return nil
                         }
-                        return LikedVideo(id: doc.documentID, timestamp: timestamp.dateValue())
+                        return self.createVideo(doc.documentID, timestamp.dateValue())
                     }
                 }
         } catch {
@@ -59,23 +63,22 @@ class LikesService: ObservableObject {
         }
     }
     
-    func toggleLike(videoId: String) {
+    func toggleSavedState(videoId: String) {
         guard let userId = Auth.auth().currentUser?.uid else { return }
-        let likeRef = db.collection("users")
+        
+        let ref = db.collection("users")
             .document(userId)
-            .collection("likes")
+            .collection(collectionName)
             .document(videoId)
         
-        if isLiked(videoId: videoId) {
-            // Unlike
-            likeRef.delete()
+        if isSaved(videoId: videoId) {
+            ref.delete()
         } else {
-            // Like
-            likeRef.setData(["timestamp": FieldValue.serverTimestamp()])
+            ref.setData(["timestamp": FieldValue.serverTimestamp()])
         }
     }
     
-    func isLiked(videoId: String) -> Bool {
-        return likedVideos.contains(where: { $0.id == videoId })
+    func isSaved(videoId: String) -> Bool {
+        return videos.contains(where: { $0.id == videoId })
     }
 }

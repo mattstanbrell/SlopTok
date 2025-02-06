@@ -1,11 +1,13 @@
 import SwiftUI
 import AVKit
-// Updated struct declaration without onUnlike callback
-struct LikedVideoPlayerCell: View {
-    let video: VideoPlayerModel
-    let isCurrentVideo: Bool
-    @ObservedObject var likesService: LikesService
-    
+
+protocol SavedVideoPlayerCell: View {
+    var video: VideoPlayerModel { get }
+    var isCurrentVideo: Bool { get }
+    var likesService: LikesService { get }
+}
+
+extension SavedVideoPlayerCell {
     var body: some View {
         ZStack {
             VideoPlayerView(
@@ -20,4 +22,10 @@ struct LikedVideoPlayerCell: View {
         .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
         .clipped()
     }
+}
+
+struct DefaultSavedVideoPlayerCell: SavedVideoPlayerCell {
+    let video: VideoPlayerModel
+    let isCurrentVideo: Bool
+    @ObservedObject var likesService: LikesService
 }

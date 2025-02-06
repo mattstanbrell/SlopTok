@@ -157,7 +157,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .onReceive(likesService.$likedVideos) { _ in
+            .onReceive(likesService.likedVideosPublisher) { _ in
                 if scrollPosition == nil {
                     scrollPosition = 0
                 }

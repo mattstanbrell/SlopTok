@@ -1,7 +1,7 @@
 import Foundation
 
 // Model to represent a bookmarked video with timestamp
-struct BookmarkedVideo: Codable, Identifiable, Equatable {
+struct BookmarkedVideo: Identifiable, Equatable, SavedVideo {
     let id: String
     let timestamp: Date
     
