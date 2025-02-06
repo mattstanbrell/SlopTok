@@ -5,6 +5,7 @@ struct ControlDotView: View {
     @Binding var isExpanded: Bool
     @State private var showProfile = false
     @State private var showComments = false
+    @State private var isClosing = false  // Track if control pill is in the process of closing
     let userName: String
     let dotColor: Color  // This will be red when liked, white when not
     @ObservedObject var likesService: LikesService
@@ -12,7 +13,19 @@ struct ControlDotView: View {
     let currentVideoId: String
     let onBookmarkAction: (() -> Void)?  // New optional action for bookmark remover
     let onProfileAction: (() -> Void)?
-    
+
+    init(isExpanded: Binding<Bool>, userName: String, dotColor: Color, likesService: LikesService, bookmarksService: BookmarksService, currentVideoId: String, onBookmarkAction: (() -> Void)? = nil, onProfileAction: (() -> Void)? = nil) {
+        // print("🔄 ControlDotView initialized - isExpanded: \(isExpanded.wrappedValue)")
+        self._isExpanded = isExpanded
+        self.userName = userName
+        self.dotColor = dotColor
+        self.likesService = likesService
+        self.bookmarksService = bookmarksService
+        self.currentVideoId = currentVideoId
+        self.onBookmarkAction = onBookmarkAction
+        self.onProfileAction = onProfileAction
+    }
+
     private var backgroundColor: Color {
         dotColor.opacity(isExpanded ? 0.3 : 0.2)
     }
@@ -25,13 +38,18 @@ struct ControlDotView: View {
         HStack {
             if isExpanded {
                 Button(action: {
-                    if let profileAction = onProfileAction {
-                        profileAction()
-                    } else {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            showProfile = true
+                    // print("👤 Profile button tapped - isClosing: \(isClosing)")
+                    if !isClosing {
+                        if let profileAction = onProfileAction {
+                            profileAction()
+                        } else {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                showProfile = true
+                            }
                         }
-                    }
+                    } // else {
+                        // print("❌ Profile button ignored - closing state active")
+                    // }
                 }) {
                     Image(systemName: "person")
                         .font(.system(size: 18, weight: .medium))
@@ -50,14 +68,20 @@ struct ControlDotView: View {
                         .padding(.leading, 8)
                         .padding(.vertical, 4)
                 }
+                .disabled(isClosing)  // Disable when closing
                 
                 Spacer()
                 
                 // Comment button
                 Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        showComments = true
-                    }
+                    // print("💬 Comments button tapped - isClosing: \(isClosing)")
+                    if !isClosing {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            showComments = true
+                        }
+                    } // else {
+                        // print("❌ Comments button ignored - closing state active")
+                    // }
                 }) {
                     Image(systemName: "bubble.left")
                         .font(.system(size: 18, weight: .medium))
@@ -75,18 +99,26 @@ struct ControlDotView: View {
                         )
                         .padding(.vertical, 4)
                 }
+                .disabled(isClosing)  // Disable when closing
                 
                 Spacer()
                 
                 Button(action: {
-                    if let action = onBookmarkAction {
-                        action()
-                    } else {
-                        bookmarksService.toggleBookmark(videoId: currentVideoId)
-                    }
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        isExpanded = false
-                    }
+                    // print("🔖 Bookmark button tapped - isClosing: \(isClosing)")
+                    if !isClosing {
+                        if let action = onBookmarkAction {
+                            action()
+                        } else {
+                            bookmarksService.toggleBookmark(videoId: currentVideoId)
+                        }
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            // print("📍 Setting isClosing = true from bookmark button")
+                            isClosing = true
+                            isExpanded = false
+                        }
+                    } // else {
+                        // print("❌ Bookmark button ignored - closing state active")
+                    // }
                 }) {
                     Image(systemName: "bookmark")
                         .font(.system(size: 18, weight: .medium))
@@ -105,6 +137,7 @@ struct ControlDotView: View {
                         .padding(.trailing, 8)
                         .padding(.vertical, 4)
                 }
+                .disabled(isClosing)  // Disable when closing
             }
         }
         .frame(width: isExpanded ? UIScreen.main.bounds.width - 32 : 16,
@@ -139,8 +172,23 @@ struct ControlDotView: View {
         .padding(20)
         .contentShape(Rectangle())
         .onTapGesture {
+            // print("🔄 Pill tapped - current state: expanded=\(isExpanded), closing=\(isClosing)")
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                if isExpanded {
+                    // print("📍 Setting isClosing = true from pill tap")
+                    isClosing = true
+                }
                 isExpanded.toggle()
+            }
+        }
+        .onChange(of: isExpanded) { newValue in
+            // print("🔄 isExpanded changed to \(newValue) - current closing state: \(isClosing)")
+            if newValue {
+                // print("📍 Setting isClosing = false (expanding)")
+                isClosing = false
+            } else {
+                // print("📍 Setting isClosing = true (closing)")
+                isClosing = true
             }
         }
         .sheet(isPresented: $showProfile) {
