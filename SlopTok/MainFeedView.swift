@@ -54,6 +54,9 @@ struct ContentView: View {
             }
         }
         
+        // Preload current video's comments
+        CommentsService.shared.preloadComments(for: videos[index])
+        
         if indicesToPreload.isEmpty { return }
         
         // Update player cache position tracking
