@@ -66,7 +66,6 @@ struct LikedVideoPlayerView: View {
                     LikedVideoPlayerCell(
                         video: video,
                         isCurrentVideo: isCurrent,
-                        onUnlike: onRemove,
                         likesService: likesService
                     )
                 )

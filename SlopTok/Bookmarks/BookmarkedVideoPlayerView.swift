@@ -74,7 +74,6 @@ struct BookmarkedVideoPlayerView: View {
                     BookmarkedVideoPlayerCell(
                         video: video,
                         isCurrentVideo: isCurrent,
-                        onUnlike: onRemove,
                         likesService: likesService
                     )
                 )

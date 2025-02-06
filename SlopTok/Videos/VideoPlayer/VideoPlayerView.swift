@@ -4,13 +4,11 @@ import FirebaseStorage
 
 struct VideoPlayerView: View {
     let videoResource: String
-    var onDoubleTapAction: (() -> Void)? = nil
     @StateObject private var viewModel: VideoPlayerViewModel
     @State private var previousMidY: CGFloat = 0
-    
-    init(videoResource: String, likesService: LikesService, isVideoLiked: Binding<Bool>, onDoubleTapAction: (() -> Void)? = nil) {
+
+    init(videoResource: String, likesService: LikesService, isVideoLiked: Binding<Bool>) {
         self.videoResource = videoResource
-        self.onDoubleTapAction = onDoubleTapAction
         _viewModel = StateObject(wrappedValue: VideoPlayerViewModel(
             videoResource: videoResource,
             likesService: likesService,
@@ -33,7 +31,6 @@ struct VideoPlayerView: View {
                             }
                             .onTapGesture(count: 2) {
                                 viewModel.handleDoubleTap()
-                                onDoubleTapAction?()
                             }
                     )
             } else {
