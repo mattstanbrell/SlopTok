@@ -103,16 +103,7 @@ struct CommentsSheetView: View {
                     Divider()
                     HStack(spacing: 12) {
                         if let user = Auth.auth().currentUser {
-                            AsyncImage(url: URL(string: user.photoURL?.absoluteString ?? "")) { image in
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } placeholder: {
-                                Circle()
-                                    .foregroundColor(.gray.opacity(0.3))
-                            }
-                            .frame(width: 32, height: 32)
-                            .clipShape(Circle())
+                            CachedAvatarView(size: 32)
                         }
                         
                         TextField(replyingTo == nil ? "Add a comment..." : "Reply to \(replyingTo?.authorName ?? "")...",

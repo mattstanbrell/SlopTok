@@ -23,16 +23,7 @@ struct CommentView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             // Author avatar
-            AsyncImage(url: URL(string: comment.authorAvatar)) { image in
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } placeholder: {
-                Circle()
-                    .foregroundColor(.gray.opacity(0.3))
-            }
-            .frame(width: 36, height: 36)
-            .clipShape(Circle())
+            CachedAvatarView(size: 36)
             
             // Comment content
             VStack(alignment: .leading, spacing: 2) {
