@@ -3,7 +3,7 @@ import SwiftUI
 struct BookmarkedVideoPlayerCell: View {
     let video: VideoPlayerModel
     let isCurrentVideo: Bool
-    let onUnbookmark: () -> Void
+    let onUnlike: () -> Void
     @ObservedObject var likesService: LikesService
     
     var body: some View {
@@ -15,7 +15,7 @@ struct BookmarkedVideoPlayerCell: View {
                     get: { likesService.isLiked(videoId: video.id) },
                     set: { _ in }
                 ),
-                onDoubleTapAction: onUnbookmark
+                onDoubleTapAction: onUnlike
             )
         }
         .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)

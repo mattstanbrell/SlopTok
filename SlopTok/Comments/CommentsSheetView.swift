@@ -3,7 +3,7 @@ import FirebaseAuth
 
 struct CommentsSheetView: View {
     let videoId: String
-    @StateObject private var commentsService = CommentsService()
+    @ObservedObject private var commentsService = CommentsService.shared
     @State private var newCommentText = ""
     @State private var replyingTo: Comment?
     @Environment(\.dismiss) private var dismiss

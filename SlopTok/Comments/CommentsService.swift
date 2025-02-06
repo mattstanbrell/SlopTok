@@ -9,10 +9,18 @@ struct CommentThread: Identifiable {
 }
 
 class CommentsService: ObservableObject {
+    static let shared = CommentsService()
+    
     private let db = Firestore.firestore()
-    @Published var commentThreads: [CommentThread] = []
-    @Published var isLoading = false
-    @Published var error: Error?
+    @Published private(set) var commentThreads: [CommentThread] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var error: Error?
+    
+    private var activeListener: ListenerRegistration?
+    private var currentVideoId: String?
+    
+    // Make init private for singleton
+    private init() {}
     
     private func organizeIntoThreads(_ comments: [Comment]) -> [CommentThread] {
         // First, create a dictionary of comments by their IDs
@@ -39,11 +47,30 @@ class CommentsService: ObservableObject {
         return buildThreads(parentId: nil)
     }
     
+    func preloadComments(for videoId: String) {
+        // If already loaded for this video, do nothing
+        if videoId == currentVideoId { return }
+        
+        // Clean up previous listener if any
+        cleanupCurrentVideo()
+        
+        // Set new video and start loading
+        currentVideoId = videoId
+        fetchComments(for: videoId)
+    }
+    
+    private func cleanupCurrentVideo() {
+        activeListener?.remove()
+        activeListener = nil
+        currentVideoId = nil
+        commentThreads = []
+    }
+    
     func fetchComments(for videoId: String) {
         guard let currentUser = Auth.auth().currentUser else { return }
         isLoading = true
         
-        db.collection("videos").document(videoId).collection("comments")
+        activeListener = db.collection("videos").document(videoId).collection("comments")
             .order(by: "timestamp", descending: true)
             .addSnapshotListener { [weak self] snapshot, error in
                 guard let self = self else { return }
@@ -174,4 +201,4 @@ class CommentsService: ObservableObject {
             }
         }
     }
-} 
+}

@@ -35,6 +35,10 @@ struct LikedVideoPlayerView: View {
         let total = videos.count
         let maxIndex = min(index + 5, total - 1)
         if maxIndex <= index { return }
+        
+        // Preload current video's comments
+        CommentsService.shared.preloadComments(for: videos[index].id)
+        
         for i in (index + 1)...maxIndex {
             let video = videos[i]
             VideoURLCache.shared.getVideoURL(for: video.id) { url in
