@@ -140,8 +140,8 @@ struct ControlDotView: View {
                 .disabled(isClosing)  // Disable when closing
             }
         }
-        .frame(width: isExpanded ? UIScreen.main.bounds.width - 32 : 16,
-               height: isExpanded ? 48 : 16)
+        .frame(width: isExpanded ? UIScreen.main.bounds.width - 32 : 20,
+               height: isExpanded ? 48 : 20)
         .background(
             Group {
                 if isExpanded {
@@ -165,12 +165,14 @@ struct ControlDotView: View {
                 if showRing {
                     Capsule()
                         .stroke(Color.yellow.opacity(0.3), lineWidth: 1)
-                        .frame(width: 20, height: 20)
+                        .frame(width: 24, height: 24)
                 }
             }
         )
-        .padding(20)
+        .padding(.vertical, isExpanded ? 0 : 20)
         .contentShape(Rectangle())
+        .frame(width: isExpanded ? UIScreen.main.bounds.width - 32 : 44,
+               height: isExpanded ? 48 : 44)
         .onTapGesture {
             // print("🔄 Pill tapped - current state: expanded=\(isExpanded), closing=\(isClosing)")
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
