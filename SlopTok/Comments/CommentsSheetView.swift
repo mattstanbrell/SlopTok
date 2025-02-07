@@ -70,6 +70,7 @@ struct CommentsSheetView: View {
                         )
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal)
+                        .padding(.vertical, 4)
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(replyingTo?.id == comment.id ? Color.pink.opacity(0.1) : Color.clear)
                         .listRowSeparator(.hidden)
@@ -100,37 +101,58 @@ struct CommentsSheetView: View {
                 
                 // Comment input area
                 VStack(spacing: 0) {
-                    Divider()
-                    HStack(spacing: 12) {
+                    HStack(spacing: 10) {
                         if let user = Auth.auth().currentUser {
                             CachedAvatarView(size: 32)
                         }
                         
-                        TextField(replyingTo == nil ? "Add a comment..." : "Reply to \(replyingTo?.authorName ?? "")...",
-                                text: $newCommentText)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .focused($isInputActive)
-                        
-                        if replyingTo != nil {
-                            Button(action: { replyingTo = nil }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.gray)
+                        HStack {
+                            TextField(replyingTo == nil ? "Add a comment..." : "Reply to \(replyingTo?.authorName ?? "")...",
+                                    text: $newCommentText)
+                                .focused($isInputActive)
+                            
+                            if replyingTo != nil {
+                                Button(action: { replyingTo = nil }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.gray)
+                                }
+                            }
+                            
+                            // Invisible placeholder to maintain consistent height
+                            if newCommentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Image(systemName: "paperplane.fill")
+                                    .foregroundColor(.clear)
+                                    .frame(width: 28, height: 28)
+                            } else {
+                                Button(action: submitComment) {
+                                    Image(systemName: "paperplane.fill")
+                                        .foregroundColor(.white)
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .frame(width: 28, height: 28)
+                                        .background(Color.blue)
+                                        .clipShape(Circle())
+                                }
+                                .transition(.opacity.animation(.easeInOut(duration: 0.15)))
                             }
                         }
-                        
-                        Button(action: submitComment) {
-                            Image(systemName: "paperplane.fill")
-                                .foregroundColor(newCommentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .gray : .blue)
-                        }
-                        .disabled(newCommentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .padding(8)
+                        .background(Color(uiColor: UIColor { traitCollection in
+                            traitCollection.userInterfaceStyle == .dark ? 
+                                UIColor(white: 0.2, alpha: 1.0) :
+                                UIColor.systemGray6
+                        }))
+                        .cornerRadius(16)
                     }
-                    .padding()
-                    .background(Color(.systemBackground))
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 10)
+                    .background(.thinMaterial)
                 }
             }
         }
+        .background(Color(.systemBackground).opacity(0.5))
         .presentationDetents([.height(UIScreen.main.bounds.height * 0.7)])
         .presentationDragIndicator(.visible)
+        .presentationBackground(.ultraThinMaterial)
         .interactiveDismissDisabled(isInputActive)  // Prevent dismissal when keyboard is active
         .onAppear {
             commentsService.fetchComments(for: videoId)
