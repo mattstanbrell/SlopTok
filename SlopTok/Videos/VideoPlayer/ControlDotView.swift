@@ -17,7 +17,7 @@ struct ControlDotView: View {
 
     /// Width of the pill in expanded state
     private var finalWidth: CGFloat {
-        UIScreen.main.bounds.width - 32
+        min(280, UIScreen.main.bounds.width - 32)
     }
     /// Size of the collapsed dot (a circle)
     private let collapsedSize: CGFloat = 20
@@ -106,10 +106,6 @@ struct ControlDotView: View {
                 Button {
                     if !isClosing {
                         shareVideo()
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            isClosing = true
-                            isExpanded = false
-                        }
                     }
                 } label: {
                     buttonIcon("square.and.arrow.up")
@@ -151,7 +147,7 @@ struct ControlDotView: View {
                 Color.clear
                     .background(.ultraThinMaterial)
                 if likesService.isLiked(videoId: currentVideoId) {
-                    Color.red.opacity(0.1)
+                    Color.red.opacity(0.2)
                 }
             }
         )
@@ -188,19 +184,11 @@ struct ControlDotView: View {
 
     // Helper to create a button icon with the same style
     private func buttonIcon(_ name: String, foregroundColor: Color = .white) -> some View {
-        Image(systemName: name)
-            .font(.system(size: 18, weight: .medium))
+        Image(systemName: name + ".fill")
+            .font(.system(size: 22, weight: .medium))
             .foregroundColor(foregroundColor)
-            .frame(width: 36, height: 36)
-            .background(
-                ZStack {
-                    Circle().fill(.ultraThinMaterial)
-                    Circle().stroke(.white.opacity(0.15), lineWidth: 0.5)
-                }
-                .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
-                .shadow(color: .white.opacity(0.2), radius: 3, x: 0, y: 0)
-            )
-            .padding(.vertical, 4)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
     }
 
     private func shareVideo() {
