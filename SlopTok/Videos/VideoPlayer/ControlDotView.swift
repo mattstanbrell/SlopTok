@@ -148,9 +148,11 @@ struct ControlDotView: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isExpanded)
         .background(
             ZStack {
-                dotColor.opacity(isExpanded ? 0.4 : 0.2)
-                    .background(.regularMaterial)
-                    .blur(radius: isExpanded ? 0 : 5)
+                Color.clear
+                    .background(.ultraThinMaterial)
+                if likesService.isLiked(videoId: currentVideoId) {
+                    Color.red.opacity(0.1)
+                }
             }
         )
         .clipShape(Capsule())
@@ -164,15 +166,18 @@ struct ControlDotView: View {
                 }
             }
         )
-        // So the entire 20×20 or 48×... area is tappable,
-        // but also keep the 60-pt parent so taps around are recognized.
+        // Create a larger tappable area while keeping visual size
+        .frame(width: isExpanded ? nil : 60, height: isExpanded ? nil : 60)
+        // So the entire area is tappable
         .contentShape(Rectangle())
         .onTapGesture {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                if isExpanded {
-                    isClosing = true
+            if !isExpanded {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    if isExpanded {
+                        isClosing = true
+                    }
+                    isExpanded.toggle()
                 }
-                isExpanded.toggle()
             }
         }
         .onChange(of: isExpanded) { newValue in
