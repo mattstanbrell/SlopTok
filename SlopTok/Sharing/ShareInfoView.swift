@@ -20,7 +20,7 @@ struct ShareInfoView: View {
             .transition(.move(edge: .top).combined(with: .opacity))
             .onAppear {
                 // Hide after 5 seconds
-                DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                     withAnimation {
                         isVisible = false
                     }
