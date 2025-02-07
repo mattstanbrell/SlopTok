@@ -104,6 +104,35 @@ struct ControlDotView: View {
                 Spacer()
                 
                 Button(action: {
+                    if !isClosing {
+                        shareVideo()
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            isClosing = true
+                            isExpanded = false
+                        }
+                    }
+                }) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(width: 36, height: 36)
+                        .background(
+                            ZStack {
+                                Circle()
+                                    .fill(.ultraThinMaterial)
+                                Circle()
+                                    .stroke(.white.opacity(0.15), lineWidth: 0.5)
+                            }
+                            .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
+                            .shadow(color: .white.opacity(0.2), radius: 3, x: 0, y: 0)
+                        )
+                        .padding(.vertical, 4)
+                }
+                .disabled(isClosing)  // Disable when closing
+                
+                Spacer()
+                
+                Button(action: {
                     // print("🔖 Bookmark button tapped - isClosing: \(isClosing)")
                     if !isClosing {
                         if let action = onBookmarkAction {
@@ -200,6 +229,43 @@ struct ControlDotView: View {
         .sheet(isPresented: $showComments) {
             CommentsSheetView(videoId: currentVideoId)
                 .presentationDragIndicator(.visible)
+        }
+    }
+    
+    private func shareVideo() {
+        print("🔗 Share - Starting share process for video: \(currentVideoId)")
+        Task {
+            do {
+                print("🔗 Share - Creating share record in Firebase")
+                let shareId = try await ShareService.shared.createShare(videoId: currentVideoId)
+                print("✅ Share - Share record created with ID: \(shareId)")
+                
+                let url = ShareService.shared.createShareURL(videoId: currentVideoId, shareId: shareId)
+                print("🔗 Share - Generated URL: \(url)")
+                
+                await MainActor.run {
+                    print("🔗 Share - Presenting share sheet")
+                    let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+                    
+                    // Find the currently active window scene
+                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                       let window = windowScene.windows.first,
+                       let rootVC = window.rootViewController {
+                        // For iPad
+                        if let popoverController = activityVC.popoverPresentationController {
+                            popoverController.sourceView = rootVC.view
+                            popoverController.sourceRect = CGRect(x: UIScreen.main.bounds.midX, y: UIScreen.main.bounds.midY, width: 0, height: 0)
+                            popoverController.permittedArrowDirections = []
+                        }
+                        rootVC.present(activityVC, animated: true)
+                        print("✅ Share - Share sheet presented")
+                    } else {
+                        print("❌ Share - Could not find root view controller")
+                    }
+                }
+            } catch {
+                print("❌ Share - Error sharing video: \(error)")
+            }
         }
     }
 }

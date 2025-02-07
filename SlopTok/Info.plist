@@ -12,6 +12,14 @@
 				<string>com.googleusercontent.apps.979158569562-h9r86fenu4udck2qk3jlqecumq6bikni</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>sloptok</string>
+			</array>
+			<key>CFBundleURLName</key>
+			<string>com.mattstanbrell.sloptok</string>
+		</dict>
 	</array>
 </dict>
 </plist>
