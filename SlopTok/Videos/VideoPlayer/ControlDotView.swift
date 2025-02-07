@@ -177,7 +177,7 @@ struct ControlDotView: View {
                     ZStack {
                         dotColor.opacity(0.4)
                     }
-                    .background(.regularMaterial)
+                    .background(.ultraThinMaterial)
                     .blur(radius: 20)
                 } else {
                     ZStack {
@@ -198,10 +198,8 @@ struct ControlDotView: View {
                 }
             }
         )
-        .padding(.vertical, isExpanded ? 0 : 20)
+        .frame(height: 60)
         .contentShape(Rectangle())
-        .frame(width: isExpanded ? UIScreen.main.bounds.width - 32 : 60,
-               height: isExpanded ? 48 : 60)
         .onTapGesture {
             // print("🔄 Pill tapped - current state: expanded=\(isExpanded), closing=\(isClosing)")
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
