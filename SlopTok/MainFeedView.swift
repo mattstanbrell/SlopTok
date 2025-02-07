@@ -67,12 +67,9 @@ struct MainFeedView: View {
         // Preload current video's comments
         CommentsService.shared.preloadComments(for: videos[index])
         
-        if indicesToPreload.isEmpty { return }
-        
         // Update player cache position tracking
         PlayerCache.shared.updatePosition(current: videos[index])
         
-        // Only proceed if we need to preload something
         var needsPreload = false
         for i in indicesToPreload {
             if !PlayerCache.shared.hasPlayer(for: videos[i]) {
@@ -85,11 +82,10 @@ struct MainFeedView: View {
         
         for i in indicesToPreload {
             let resource = videos[i]
-            
             // Skip if already preloaded
             if PlayerCache.shared.hasPlayer(for: resource) { continue }
             
-            // First check if we have the video file cached
+            // Check if we have the video file cached
             let localURL = VideoFileCache.shared.localFileURL(for: resource)
             if FileManager.default.fileExists(atPath: localURL.path) {
                 createAndCachePlayer(for: resource, url: localURL)
@@ -118,9 +114,12 @@ struct MainFeedView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .bottom) {
+                
                 ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(videos.enumerated()), id: \.offset) { index, video in
+                    // 👇 MINIMAL FIX: Use the video itself as the ForEach ID
+                    //    This way SwiftUI re‐diffs the top row if the video changes.
+                    VStack(spacing: 0) {
+                        ForEach(Array(videos.enumerated()), id: \.element) { (index, video) in
                             ZStack {
                                 VideoPlayerView(
                                     videoResource: video,
@@ -148,6 +147,7 @@ struct MainFeedView: View {
                             .frame(width: UIScreen.main.bounds.width,
                                    height: UIScreen.main.bounds.height)
                             .clipped()
+                            // Keep .id(index) so ScrollViewReader & .scrollPosition work by offset
                             .id(index)
                         }
                     }

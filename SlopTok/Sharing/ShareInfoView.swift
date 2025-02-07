@@ -8,13 +8,14 @@ struct ShareInfoView: View {
     var body: some View {
         if isVisible {
             HStack {
-                Image(systemName: "square.and.arrow.up")
+                Image(systemName: "person.2")
                 Text("Shared by \(userName)")
                     .font(.caption)
             }
-            .padding(8)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
             .background(.ultraThinMaterial)
-            .cornerRadius(8)
+            .cornerRadius(20)
             .padding()
             .transition(.move(edge: .top).combined(with: .opacity))
             .onAppear {
