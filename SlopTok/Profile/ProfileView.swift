@@ -27,7 +27,7 @@ struct ProfileView: View {
                         .font(.title2)
                         .fontWeight(.semibold)
                 }
-                .padding(.top, 12)
+                // .padding(.top, 4)
                 .padding(.bottom, 24)
                 
                 // Divider
@@ -45,11 +45,6 @@ struct ProfileView: View {
                                 Text(["Likes", "Bookmarks"][index])
                                     .foregroundColor(selectedTab == index ? .primary : .secondary)
                                     .font(.system(size: 16, weight: .semibold))
-                                
-                                // Underline indicator
-                                Rectangle()
-                                    .fill(selectedTab == index ? Color.primary : Color.clear)
-                                    .frame(height: 1)
                             }
                             .padding(.vertical, 12)
                         }
@@ -57,7 +52,7 @@ struct ProfileView: View {
                     }
                 }
                 .padding(.horizontal)
-                .padding(.top, 8)
+                .padding(.vertical, 8)
                 
                 // Tab content with page style using simplified GridView with defaults
                 TabView(selection: $selectedTab) {
@@ -78,9 +73,6 @@ struct ProfileView: View {
                         )
                     }
                     .tag(1)
-                    .task {
-                        await bookmarksService.loadBookmarkedVideos()
-                    }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
             }
@@ -90,8 +82,9 @@ struct ProfileView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: signOut) {
                         Image(systemName: "rectangle.portrait.and.arrow.right")
-                            .foregroundColor(.red)
+                            .foregroundColor(.red.opacity(0.6))
                             .font(.system(size: 17, weight: .semibold))
+                            .scaleEffect(x: -1, y: 1)
                     }
                 }
             }
@@ -99,6 +92,7 @@ struct ProfileView: View {
         .task {
             await bookmarksService.loadBookmarkedVideos()
         }
+        .presentationBackground(.thinMaterial)
     }
     
     private func signOut() {
