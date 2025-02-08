@@ -118,21 +118,34 @@ struct CommentsSheetView: View {
                                 }
                             }
                             
-                            // Invisible placeholder to maintain consistent height
-                            if newCommentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Image(systemName: "paperplane.fill")
-                                    .foregroundColor(.clear)
-                                    .frame(width: 28, height: 28)
-                            } else {
+                            // Send button - always visible when replying
+                            if replyingTo != nil {
                                 Button(action: submitComment) {
                                     Image(systemName: "paperplane.fill")
                                         .foregroundColor(.white)
                                         .font(.system(size: 16, weight: .semibold))
                                         .frame(width: 28, height: 28)
-                                        .background(Color.blue)
+                                        .background(newCommentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.gray.opacity(0.3) : Color.blue)
                                         .clipShape(Circle())
                                 }
-                                .transition(.opacity.animation(.easeInOut(duration: 0.15)))
+                                .animation(.easeInOut(duration: 0.15), value: newCommentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            } else {
+                                // Original behavior for non-reply comments
+                                if newCommentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    Image(systemName: "paperplane.fill")
+                                        .foregroundColor(.clear)
+                                        .frame(width: 28, height: 28)
+                                } else {
+                                    Button(action: submitComment) {
+                                        Image(systemName: "paperplane.fill")
+                                            .foregroundColor(.white)
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .frame(width: 28, height: 28)
+                                            .background(Color.blue)
+                                            .clipShape(Circle())
+                                    }
+                                    .transition(.opacity.animation(.easeInOut(duration: 0.15)))
+                                }
                             }
                         }
                         .padding(8)
