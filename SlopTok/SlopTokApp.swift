@@ -22,12 +22,14 @@ struct SlopTokApp: App {
             if authViewModel.isSignedIn {
                 MainFeedView(initialVideoId: deepLinkVideoId, shareId: deepLinkShareId)
                     .id(deepLinkCounter)
+                    .hideHomeIndicator()
                     .onOpenURL { url in
                         print("🔗 Deep Link - URL received: \(url)")
                         handleIncomingURL(url)
                     }
             } else {
                 AuthView()
+                    .hideHomeIndicator()
             }
         }
     }
