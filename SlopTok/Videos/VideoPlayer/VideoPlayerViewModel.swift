@@ -131,6 +131,11 @@ class VideoPlayerViewModel: ObservableObject {
             player?.seek(to: .zero)
             player?.play()
             isPlaying = true
+            
+            // Mark video as seen when it becomes active
+            Task {
+                await VideoViewService.shared.markVideoSeen(videoId: videoResource)
+            }
         } else {
             player?.pause()
             player?.seek(to: .zero)
