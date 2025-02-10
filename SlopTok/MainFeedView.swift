@@ -3,7 +3,7 @@ import AVKit
 import FirebaseAuth
 
 struct MainFeedView: View {
-    @State private var videos = ["water", "skyline", "IMG_0371"]  // In a real app, there would be more entries.
+    @StateObject private var videoService = VideoService.shared
     @State private var isDotExpanded = false
     @State private var scrollPosition: Int?
     @StateObject private var likesService = LikesService()
@@ -26,14 +26,15 @@ struct MainFeedView: View {
     }
     
     var currentVideoId: String {
+        guard !videoService.videos.isEmpty else { return "" }
         let position = scrollPosition ?? 0
-        return position < videos.count ? videos[position] : videos[0]
+        return position < videoService.videos.count ? videoService.videos[position] : videoService.videos[0]
     }
     
     private func updateCurrentVideoLikedStatus() {
         let position = scrollPosition ?? 0
-        if position >= 0 && position < videos.count {
-            let video = videos[position]
+        if position >= 0 && position < videoService.videos.count {
+            let video = videoService.videos[position]
             withAnimation(.easeInOut(duration: 0.2)) {
                 currentVideoLiked = likesService.isLiked(videoId: video)
             }
@@ -46,7 +47,7 @@ struct MainFeedView: View {
         if index == lastPreloadedIndex { return }
         lastPreloadedIndex = index
         
-        let total = videos.count
+        let total = videoService.videos.count
         
         // Get indices to preload (1 above, 3 below)
         var indicesToPreload = [Int]()
@@ -65,14 +66,14 @@ struct MainFeedView: View {
         }
         
         // Preload current video's comments
-        CommentsService.shared.preloadComments(for: videos[index])
+        CommentsService.shared.preloadComments(for: videoService.videos[index])
         
         // Update player cache position tracking
-        PlayerCache.shared.updatePosition(current: videos[index])
+        PlayerCache.shared.updatePosition(current: videoService.videos[index])
         
         var needsPreload = false
         for i in indicesToPreload {
-            if !PlayerCache.shared.hasPlayer(for: videos[i]) {
+            if !PlayerCache.shared.hasPlayer(for: videoService.videos[i]) {
                 needsPreload = true
                 break
             }
@@ -81,7 +82,7 @@ struct MainFeedView: View {
         if !needsPreload { return }
         
         for i in indicesToPreload {
-            let resource = videos[i]
+            let resource = videoService.videos[i]
             // Skip if already preloaded
             if PlayerCache.shared.hasPlayer(for: resource) { continue }
             
@@ -114,132 +115,69 @@ struct MainFeedView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .bottom) {
-                
-                ScrollView(.vertical, showsIndicators: false) {
-                    // 👇 MINIMAL FIX: Use the video itself as the ForEach ID
-                    //    This way SwiftUI re‐diffs the top row if the video changes.
-                    VStack(spacing: 0) {
-                        ForEach(Array(videos.enumerated()), id: \.element) { (index, video) in
-                            ZStack {
-                                VideoPlayerView(
-                                    videoResource: video,
-                                    likesService: likesService,
-                                    isVideoLiked: Binding(
-                                        get: { likesService.isLiked(videoId: video) },
-                                        set: { _ in
-                                            if index == (scrollPosition ?? 0) {
-                                                updateCurrentVideoLikedStatus()
+                if videoService.videos.isEmpty {
+                    // Loading state
+                    VStack {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text("Loading videos...")
+                            .foregroundColor(.secondary)
+                            .padding(.top)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 0) {
+                            ForEach(Array(videoService.videos.enumerated()), id: \.element) { (index, video) in
+                                ZStack {
+                                    VideoPlayerView(
+                                        videoResource: video,
+                                        likesService: likesService,
+                                        isVideoLiked: Binding(
+                                            get: { likesService.isLiked(videoId: video) },
+                                            set: { _ in
+                                                if index == (scrollPosition ?? 0) {
+                                                    updateCurrentVideoLikedStatus()
+                                                }
                                             }
-                                        }
+                                        )
                                     )
-                                )
-                                
-                                if isDotExpanded {
-                                    Color.clear
-                                        .contentShape(Rectangle())
-                                        .onTapGesture {
-                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                                isDotExpanded = false
+                                    
+                                    if isDotExpanded {
+                                        Color.clear
+                                            .contentShape(Rectangle())
+                                            .onTapGesture {
+                                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                                    isDotExpanded = false
+                                                }
                                             }
-                                        }
+                                    }
                                 }
-                            }
-                            .frame(width: UIScreen.main.bounds.width,
-                                   height: UIScreen.main.bounds.height)
-                            .clipped()
-                            // Keep .id(index) so ScrollViewReader & .scrollPosition work by offset
-                            .id(index)
-                        }
-                    }
-                    .scrollTargetLayout()
-                }
-                .scrollTargetBehavior(.paging)
-                .ignoresSafeArea()
-                .scrollPosition(id: $scrollPosition)
-                .onChange(of: scrollPosition) { newPosition in
-                    if let position = newPosition {
-                        updateCurrentVideoLikedStatus()
-                        preloadNextVideos(from: position)
-                        print("📱 MainFeedView - Scroll position changed to: \(position)")
-                    }
-                    
-                    if isDotExpanded {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            isDotExpanded = false
-                        }
-                    }
-                }
-                .onReceive(likesService.$likedVideos) { _ in
-                    if scrollPosition == nil {
-                        scrollPosition = 0
-                    }
-                    updateCurrentVideoLikedStatus()
-                }
-                .task {
-                    print("📱 MainFeedView - Task started")
-                    print("📱 MainFeedView - Initial video ID: \(String(describing: initialVideoId))")
-                    print("📱 MainFeedView - Share ID: \(String(describing: shareId))")
-                    
-                    await likesService.loadLikedVideos()
-                    await bookmarksService.loadBookmarkedVideos()
-                    updateCurrentVideoLikedStatus()
-                    
-                    print("📱 MainFeedView - Current videos: \(videos)")
-                    
-                    // If we have an initial video from deep link, insert it at the top
-                    if let sharedVideoId = initialVideoId {
-                        print("📱 MainFeedView - Attempting to insert shared video: \(sharedVideoId)")
-                        
-                        if !videos.contains(sharedVideoId) {
-                            print("📱 MainFeedView - Video not in feed, inserting at top")
-                            videos.insert(sharedVideoId, at: 0)
-                            print("📱 MainFeedView - Updated videos: \(videos)")
-                        } else {
-                            // If video exists, remove it and reinsert at top
-                            print("📱 MainFeedView - Video exists in feed, moving to top")
-                            videos.removeAll { $0 == sharedVideoId }
-                            videos.insert(sharedVideoId, at: 0)
-                            print("📱 MainFeedView - Updated videos after move: \(videos)")
-                        }
-                        
-                        // Reset scroll position to show shared video
-                        print("📱 MainFeedView - Resetting scroll position to 0")
-                        scrollPosition = 0
-                        hasInsertedSharedVideo = true
-                        
-                        // If this is a shared video, fetch and show the share info
-                        if let shareId = shareId {
-                            print("📱 MainFeedView - Fetching share info for ID: \(shareId)")
-                            do {
-                                sharedByInfo = try await ShareService.shared.getShareInfo(shareId: shareId)
-                                print("📱 MainFeedView - Share info fetched: \(String(describing: sharedByInfo))")
-                            } catch {
-                                print("❌ MainFeedView - Error fetching share info: \(error)")
+                                .frame(width: UIScreen.main.bounds.width,
+                                       height: UIScreen.main.bounds.height)
+                                .clipped()
+                                .id(index)
                             }
                         }
-                    } else {
-                        print("📱 MainFeedView - No shared video to insert")
+                        .scrollTargetLayout()
                     }
-                    
-                    if scrollPosition == nil {
-                        print("📱 MainFeedView - Setting initial scroll position to 0")
-                        scrollPosition = 0
-                    }
-                    
-                    print("📱 MainFeedView - Final videos array: \(videos)")
-                    print("📱 MainFeedView - Final scroll position: \(String(describing: scrollPosition))")
-                    preloadNextVideos(from: scrollPosition ?? 0)
-                }
-                .onChange(of: initialVideoId) { newVideoId in
-                    if let videoId = newVideoId,
-                       let index = videos.firstIndex(of: videoId) {
-                        withAnimation {
-                            scrollPosition = index
+                    .scrollTargetBehavior(.paging)
+                    .ignoresSafeArea()
+                    .scrollPosition(id: $scrollPosition)
+                    .onChange(of: scrollPosition) { newPosition in
+                        if let position = newPosition {
+                            updateCurrentVideoLikedStatus()
+                            preloadNextVideos(from: position)
+                            print("📱 MainFeedView - Scroll position changed to: \(position)")
                         }
-                        preloadNextVideos(from: index)
+                        
+                        if isDotExpanded {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                isDotExpanded = false
+                            }
+                        }
                     }
                 }
-                .zIndex(0)
                 
                 // Show share info if this is a shared video and we're at the first position
                 if scrollPosition == 0,
@@ -250,20 +188,87 @@ struct MainFeedView: View {
                     }
                 }
                 
-                ControlDotView(
-                    isExpanded: $isDotExpanded,
-                    userName: userName,
-                    dotColor: currentVideoLiked ? .red : .white,
-                    likesService: likesService,
-                    bookmarksService: bookmarksService,
-                    currentVideoId: currentVideoId,
-                    onBookmarkAction: nil,
-                    onProfileAction: nil
-                )
-                .padding(.bottom, 20)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .zIndex(2)
+                if !videoService.videos.isEmpty {
+                    ControlDotView(
+                        isExpanded: $isDotExpanded,
+                        userName: userName,
+                        dotColor: currentVideoLiked ? .red : .white,
+                        likesService: likesService,
+                        bookmarksService: bookmarksService,
+                        currentVideoId: currentVideoId,
+                        onBookmarkAction: nil,
+                        onProfileAction: nil
+                    )
+                    .padding(.bottom, 20)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .zIndex(2)
+                }
             }
         }
+        .onReceive(likesService.$likedVideos) { _ in
+            if scrollPosition == nil {
+                scrollPosition = 0
+            }
+            updateCurrentVideoLikedStatus()
+        }
+        .task {
+            print("📱 MainFeedView - Task started")
+            print("📱 MainFeedView - Initial video ID: \(String(describing: initialVideoId))")
+            print("📱 MainFeedView - Share ID: \(String(describing: shareId))")
+            
+            // Load videos first
+            await videoService.loadVideos()
+            
+            await likesService.loadLikedVideos()
+            await bookmarksService.loadBookmarkedVideos()
+            updateCurrentVideoLikedStatus()
+            
+            print("📱 MainFeedView - Current videos: \(videoService.videos)")
+            
+            // If we have an initial video from deep link, insert it at the top
+            if let sharedVideoId = initialVideoId {
+                print("📱 MainFeedView - Attempting to insert shared video: \(sharedVideoId)")
+                
+                if let index = videoService.videos.firstIndex(of: sharedVideoId) {
+                    print("📱 MainFeedView - Video exists in feed, moving to top")
+                    scrollPosition = index
+                    print("📱 MainFeedView - Updated scroll position to: \(index)")
+                }
+                
+                hasInsertedSharedVideo = true
+                
+                // If this is a shared video, fetch and show the share info
+                if let shareId = shareId {
+                    print("📱 MainFeedView - Fetching share info for ID: \(shareId)")
+                    do {
+                        sharedByInfo = try await ShareService.shared.getShareInfo(shareId: shareId)
+                        print("📱 MainFeedView - Share info fetched: \(String(describing: sharedByInfo))")
+                    } catch {
+                        print("❌ MainFeedView - Error fetching share info: \(error)")
+                    }
+                }
+            } else {
+                print("📱 MainFeedView - No shared video to insert")
+            }
+            
+            if scrollPosition == nil {
+                print("📱 MainFeedView - Setting initial scroll position to 0")
+                scrollPosition = 0
+            }
+            
+            print("📱 MainFeedView - Final videos array: \(videoService.videos)")
+            print("📱 MainFeedView - Final scroll position: \(String(describing: scrollPosition))")
+            preloadNextVideos(from: scrollPosition ?? 0)
+        }
+        .onChange(of: initialVideoId) { newVideoId in
+            if let videoId = newVideoId,
+               let index = videoService.videos.firstIndex(of: videoId) {
+                withAnimation {
+                    scrollPosition = index
+                }
+                preloadNextVideos(from: index)
+            }
+        }
+        .zIndex(0)
     }
 }

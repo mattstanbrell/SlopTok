@@ -38,9 +38,10 @@ class VideoURLCache {
         }
         
         let storage = Storage.storage()
-        let videoRef = storage.reference(withPath: "videos/\(videoResource).mp4")
+        let videoRef = storage.reference(withPath: "videos/seed/\(videoResource).mp4")
         videoRef.downloadURL { [weak self] url, error in
             if let error = error {
+                print("❌ VideoURLCache - Error getting download URL: \(error)")
                 completion(nil)
                 return
             }
