@@ -66,6 +66,22 @@ class ProfileService: ObservableObject {
                 // Update local state
                 self.currentProfile = profile
                 
+                // Generate initial prompts
+                if let profile = self.currentProfile {
+                    let promptResult = await PromptGenerationService.shared.generateInitialPrompts(
+                        likedVideos: likedVideos,
+                        profile: profile
+                    )
+                    
+                    switch promptResult {
+                    case .success(let response):
+                        print("✅ Generated \(response.prompts.count) initial prompts")
+                        // TODO: Store prompts when we implement that feature
+                    case .failure(let error):
+                        print("❌ Error generating initial prompts: \(error.description)")
+                    }
+                }
+                
             case .failure(let error):
                 print("❌ Error generating initial profile: \(error.description)")
             }
