@@ -240,12 +240,12 @@ struct LLMConfig {
             "prompt": {"type": "string"},
             "parentIds": {
                 "type": "array",
-                "items": {"type": "string"}
-            },
-            "targetLength": {"type": "integer"},
-            "style": {"type": "string"}
+                "items": {"type": "string"},
+                "maxItems": 2,
+                "description": "IDs of parent prompts (1 for mutation, 2 for crossover)"
+            }
         },
-        "required": ["prompt", "targetLength", "style"]
+        "required": ["prompt"]
     }
 }
 ```
