@@ -1,10 +1,12 @@
 import FirebaseFirestore
 import FirebaseAuth
+import FirebaseStorage
 
 @MainActor
 class VideoViewService {
     static let shared = VideoViewService()
     private let db = Firestore.firestore()
+    private let storage = Storage.storage()
     
     private init() {}
     
@@ -22,14 +24,28 @@ class VideoViewService {
             let doc = try await interactionRef.getDocument()
             let isFirstWatch = !doc.exists
             
+            // If first watch, get the video prompt from Storage metadata
+            var promptData: [String: Any] = [:]
+            if isFirstWatch {
+                let videoRef = storage.reference().child("videos/seed/\(videoId).mp4")
+                let metadata = try await videoRef.getMetadata()
+                if let prompt = metadata.customMetadata?["prompt"] {
+                    promptData["prompt"] = prompt
+                }
+            }
+            
             // Batch write for consistency
             let batch = db.batch()
             
             // 1. Update video interaction
-            batch.setData([
+            var interactionData: [String: Any] = [
                 "last_seen": FieldValue.serverTimestamp(),
                 "isFirstWatch": false
-            ], forDocument: interactionRef, merge: true)
+            ]
+            if !promptData.isEmpty {
+                interactionData.merge(promptData) { (_, new) in new }
+            }
+            batch.setData(interactionData, forDocument: interactionRef, merge: true)
             
             // 2. If first watch, increment watch counts
             if isFirstWatch {
