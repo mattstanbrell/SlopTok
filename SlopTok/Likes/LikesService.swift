@@ -64,12 +64,17 @@ class LikesService: ObservableObject {
             .collection("videoInteractions")
             .document(videoId)
         
-        if isLiked(videoId: videoId) {
-            // Unlike - only update liked status
-            interactionRef.setData(["liked": false], merge: true)
-        } else {
-            // Like - only update liked status
-            interactionRef.setData(["liked": true], merge: true)
+        let newLikeStatus = !isLiked(videoId: videoId)
+        
+        // Update like status in Firestore
+        interactionRef.setData(["liked": newLikeStatus], merge: true)
+        
+        // Update prompt lineage
+        Task {
+            try? await PromptLineageService.shared.updateAttemptLikeStatus(
+                videoId: videoId,
+                wasLiked: newLikeStatus
+            )
         }
     }
     

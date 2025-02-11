@@ -21,6 +21,9 @@ class VideoViewService {
             try await interactionRef.setData([
                 "last_seen": FieldValue.serverTimestamp()
             ], merge: true)
+            
+            // Track the video view
+            await VideoCountTracker.shared.trackNewVideo(id: videoId)
         } catch {
             print("❌ Error marking video as seen: \(error)")
         }
