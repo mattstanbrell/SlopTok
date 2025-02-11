@@ -1,8 +1,0 @@
-name = "sloptok-images"
-main = "src/worker.js"
-compatibility_date = "2025-02-11"
-workers_dev = true
-preview_urls = false
-
-[observability]
-enabled = true

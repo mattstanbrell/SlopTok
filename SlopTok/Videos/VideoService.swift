@@ -39,4 +39,9 @@ class VideoService: ObservableObject {
         isLoading = false
     }
     
+    /// Adds a video to the end of the feed
+    func appendVideo(_ videoId: String) {
+        print("📹 VideoService - Appending video: \(videoId)")
+        videos.append(videoId)
+    }
 } 
