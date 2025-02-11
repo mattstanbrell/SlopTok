@@ -27,6 +27,10 @@ struct SlopTokApp: App {
                         print("🔗 Deep Link - URL received: \(url)")
                         handleIncomingURL(url)
                     }
+                    .task {
+                        // Start monitoring watch counts when signed in
+                        await WatchCountCoordinator.shared.startMonitoring()
+                    }
             } else {
                 AuthView()
                     .hideHomeIndicator()
