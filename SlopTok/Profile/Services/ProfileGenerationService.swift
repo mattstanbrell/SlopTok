@@ -18,34 +18,41 @@ actor ProfileGenerationService {
         
         // Build the prompt
         let prompt = """
-        Generate a user profile based on these liked videos:
+        Analyze these AI video generation prompts from videos the user liked. Each prompt describes the visual content of a video they enjoyed watching:
         \(formattedVideos)
-        
-        Focus on identifying clear interests and patterns in the videos they liked.
+
+        Based on the visual themes and subjects in these liked videos, identify clear interests and patterns.
         For each interest:
-        - Choose a specific, well-defined topic
-        - Provide 3-5 examples of activities or aspects within that topic
-        - Make examples specific and varied, covering different aspects like:
-          * Specific activities (e.g., "downhill trails", "bouldering problems")
-          * Techniques (e.g., "climbing techniques", "trail maintenance")
-          * Equipment (e.g., "bike setup", "trail gear")
-          * Variations (e.g., "technical singletrack", "sport climbing routes")
-        
-        Example interests:
-        1. Mountain Biking:
-           - Examples: ["downhill trails", "bike park jumps", "technical singletrack"]
-        2. Rock Climbing:
-           - Examples: ["bouldering problems", "sport climbing routes", "climbing techniques", "indoor training"]
-        
+        - Choose a specific, well-defined topic that matches the visual content they engage with
+        - List relevant examples seen in the prompts, such as:
+          * Specific subjects or activities shown
+          * Visual styles or techniques they appreciate
+          * Equipment or props featured
+          * Settings or environments they're drawn to
+
+        Example response:
+        {
+          "interests": [
+            {
+              "topic": "Marine Life Photography",
+              "examples": ["close-up octopus behavior", "moody aquarium lighting", "underwater creature details"]
+            },
+            {
+              "topic": "Adventure Sports",
+              "examples": ["dramatic climbing shots", "golden hour outdoor photography", "dynamic action angles"]
+            }
+          ],
+          "description": "This user is drawn to intimate nature photography, particularly appreciating close-up shots that reveal detail and personality in marine life. They also engage with dynamic outdoor sports content, showing interest in how photographers capture the intensity and technical aspects of these activities."
+        }
+
         You MUST identify at least one interest and provide a description.
-        Make the description insightful about their preferences and patterns, for example:
-        "This user shows a strong interest in outdoor adventure sports, particularly gravitating towards technical challenges in mountain biking and climbing. They engage with content about both recreational aspects and skill development."
+        Make the description focus on their visual preferences and what kind of content engages them.
         """
         
         // Call LLM
         return await LLMService.shared.complete(
             userPrompt: prompt,
-            systemPrompt: "You are analyzing a user's video preferences to identify their interests and generate a profile. Be specific and concrete in your analysis, focusing on clear patterns in their liked content. Always provide a meaningful description that captures the essence of their interests.",
+            systemPrompt: "You are analyzing video generation prompts to understand a user's visual interests and content preferences. Focus on the subjects, styles, and themes they engage with in video content.",
             responseType: ProfileGenerationResponse.self,
             schema: ProfileGenerationSchema.schema
         )
