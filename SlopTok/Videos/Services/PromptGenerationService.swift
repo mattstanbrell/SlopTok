@@ -277,8 +277,13 @@ actor PromptGenerationService {
             print("❌ Could not get file size")
         }
         
+        // Generate a shorter video ID: timestamp (6 chars) + random (4 chars)
+        let timestamp = String(format: "%06x", Int(Date().timeIntervalSince1970) % 0xFFFFFF)
+        let randomChars = "abcdefghijklmnopqrstuvwxyz0123456789"
+        let random = String((0..<4).map { _ in randomChars.randomElement()! })
+        let videoId = "\(timestamp)\(random)" // Results in a 10-character ID like "f5e21cabcd"
+        
         let storage = Storage.storage()
-        let videoId = UUID().uuidString
         let videoRef = storage.reference().child("videos/generated/\(videoId).mp4")
         
         print("📤 Created storage reference: videos/generated/\(videoId).mp4")
