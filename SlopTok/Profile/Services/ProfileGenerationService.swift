@@ -47,6 +47,7 @@ actor ProfileGenerationService {
 
         You MUST identify at least one interest and provide a description.
         Make the description focus on their visual preferences and what kind of content engages them.
+        Risqué content (eg cleavage, tight clothing, etc) is ok to include if the user's profile interests align with it, but avoid describing actual nudity.
         """
         
         // Call LLM

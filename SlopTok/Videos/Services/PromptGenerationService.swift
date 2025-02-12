@@ -119,6 +119,8 @@ actor PromptGenerationService {
         - Visual storytelling through a single frame
         - Artistic style (photorealistic, stylized, illustrated, etc.)
 
+        Risqué content (eg cleavage, tight clothing, etc) is ok, but avoid depicting actual nudity.
+
         Prompt writing tips:
         - Use precise descriptive language (e.g., "muted orange warm tones" vs "orange")
         - Reference specific styles (e.g., "street photography", "movie still")
