@@ -2,12 +2,16 @@ import SwiftUI
 import FirebaseAuth
 import AVKit
 import FirebaseStorage
+import FirebaseFirestore
 
 struct ProfileView: View {
     let userName: String
     @ObservedObject var likesService: LikesService
     @StateObject private var bookmarksService = BookmarksService()
+    @StateObject private var videoService = VideoService.shared
     @State private var selectedTab = 0
+    @State private var isSeeding = false
+    @State private var isClearing = false
     @Environment(\.dismiss) private var dismiss
     
     private var userPhotoURL: URL? {
@@ -79,6 +83,33 @@ struct ProfileView: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    HStack(spacing: 16) {
+                        Button(action: seedMetadata) {
+                            if isSeeding {
+                                ProgressView()
+                                    .tint(.green)
+                            } else {
+                                Image(systemName: "leaf.fill")
+                                    .foregroundColor(.green)
+                                    .font(.system(size: 17, weight: .semibold))
+                            }
+                        }
+                        .disabled(isSeeding)
+                        
+                        Button(action: clearProfile) {
+                            if isClearing {
+                                ProgressView()
+                                    .tint(.red)
+                            } else {
+                                Image(systemName: "trash.fill")
+                                    .foregroundColor(.red.opacity(0.6))
+                                    .font(.system(size: 17, weight: .semibold))
+                            }
+                        }
+                        .disabled(isClearing)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: signOut) {
                         Image(systemName: "rectangle.portrait.and.arrow.right")
@@ -101,6 +132,123 @@ struct ProfileView: View {
             dismiss()
         } catch {
             print("Error signing out: \(error.localizedDescription)")
+        }
+    }
+    
+    private func seedMetadata() {
+        Task {
+            isSeeding = true
+            let storage = Storage.storage()
+            let seedRef = storage.reference().child("videos/seed")
+            
+            let videoPrompts: [String: String] = [
+                "dog": "A close-up portrait of a Golden Retriever puppy with fluffy fur bathed in soft morning light. The puppy's eyes sparkle with playful joy, and its pink tongue peeks out in an adorable blep. Shot with a shallow depth of field, creating a dreamy, blurred background of pastel greens and golds. Professional photography with warm color grading emphasizes the honey-colored fur and captures fine details like whiskers and the texture of its velvet nose. The image has a cozy, heartwarming mood that highlights the puppy's natural charm.",
+                "patriot": "A majestic American flag billowing against a dramatic sunset sky, its fabric catching golden light as it waves in the mountain breeze. The flag's stars and stripes are captured in pristine detail, showing subtle textile textures and natural folds. Behind it, rays of sunlight pierce through scattered clouds, creating a rich palette of deep reds, warm oranges, and royal blues. Shot in high resolution with professional equipment, emphasizing both the grand scale and intimate details of the scene. The composition creates a sense of timeless dignity, with the flag positioned against a backdrop of distant purple mountains and amber-lit clouds.",
+                "anime": "A stylized anime warrior standing in a cherry blossom storm, their long hair and flowing traditional robes dancing in the wind. The scene features vibrant cel-shaded artwork with dramatic lighting, sharp line art, and a soft bokeh effect from the pink petals. The character design shows intricate armor details with a mix of traditional Japanese elements and fantasy elements. Background features a misty mountain temple with golden hour lighting creating a cinematic atmosphere.",
+                "submarine": "A submarine control room bathed in the red glow of emergency lighting. The sonar operator's face is illuminated by multiple blue-tinted screens showing underwater topography and contact signatures. Their specialized headset and tactical gear stand out against the background of complex instrumentation and classified system readouts.",
+                "alien": "A classified underground laboratory illuminated by stark surgical lights, where technicians in hazmat suits work at a sterile steel table. Their protective gear features advanced monitoring equipment and reflective patches catching the light. The specimen table displays holographic medical readouts and contains an otherworldly figure partially obscured by specialized containment equipment. The scene is captured through security camera-style framing with government classification markers in the corners. Multiple screens in the background show DNA sequences and exotic biological readings in neon green and blue, while warning lights cast an eerie red glow across the metallic surfaces. The atmosphere is clinical yet mysterious, with subtle steam venting from cryogenic equipment adding depth to the shadowy facility."
+            ]
+            
+            do {
+                let result = try await seedRef.listAll()
+                
+                for item in result.items {
+                    let videoName = String(item.name.dropLast(4)) // Remove .mp4
+                    print("🔍 Processing video: \(item.fullPath)")
+                    
+                    if let prompt = videoPrompts[videoName] {
+                        do {
+                            let metadata = StorageMetadata()
+                            metadata.customMetadata = ["prompt": prompt]
+                            
+                            _ = try await item.updateMetadata(metadata)
+                            print("✅ Set metadata for video: \(videoName)")
+                        } catch {
+                            print("❌ Error with \(videoName): \(error)")
+                        }
+                    }
+                }
+                
+                print("📹 Finished setting metadata for seed videos")
+            } catch {
+                print("❌ Error setting video metadata: \(error)")
+            }
+            
+            isSeeding = false
+        }
+    }
+    
+    private func clearProfile() {
+        guard let userId = Auth.auth().currentUser?.uid else { return }
+        
+        Task {
+            isClearing = true
+            let db = Firestore.firestore()
+            let storage = Storage.storage()
+            
+            do {
+                // Create a batch to perform all operations atomically
+                let batch = db.batch()
+                
+                // Clear interests collection
+                let interestsSnapshot = try await db.collection("users")
+                    .document(userId)
+                    .collection("interests")
+                    .getDocuments()
+                
+                for doc in interestsSnapshot.documents {
+                    batch.deleteDocument(doc.reference)
+                }
+                
+                // Reset user document
+                let userRef = db.collection("users").document(userId)
+                batch.updateData([
+                    "description": "",
+                    "lastUpdated": FieldValue.delete()
+                ], forDocument: userRef)
+                
+                // Reset watch counts
+                let watchCountsRef = userRef.collection("watchCounts").document("counts")
+                batch.setData([
+                    "videosWatchedSinceLastPrompt": 0,
+                    "videosWatchedSinceLastProfile": 0
+                ], forDocument: watchCountsRef, merge: true)
+                
+                // Separately remove the timestamp fields using updateData
+                batch.updateData([
+                    "lastPromptGeneration": FieldValue.delete(),
+                    "lastProfileUpdate": FieldValue.delete()
+                ], forDocument: watchCountsRef)
+                
+                // Clear video interactions
+                let interactionsSnapshot = try await db.collection("users")
+                    .document(userId)
+                    .collection("videoInteractions")
+                    .getDocuments()
+                
+                for doc in interactionsSnapshot.documents {
+                    batch.deleteDocument(doc.reference)
+                }
+                
+                // Commit all Firestore changes
+                try await batch.commit()
+                
+                // Delete all generated videos
+                let generatedRef = storage.reference().child("videos/generated")
+                let generatedVideos = try await generatedRef.listAll()
+                
+                for item in generatedVideos.items {
+                    try await item.delete()
+                    print("✅ Deleted generated video: \(item.name)")
+                }
+                
+                print("✅ Successfully cleared user profile data and generated videos")
+                
+            } catch {
+                print("❌ Error clearing profile: \(error)")
+            }
+            
+            isClearing = false
         }
     }
 }
