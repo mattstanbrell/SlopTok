@@ -10,7 +10,6 @@ struct SlopTokApp: App {
     @State private var deepLinkVideoId: String?
     @State private var deepLinkShareId: String?
     @State private var deepLinkCounter = 0
-    @State private var hasGeneratedTestVideo = false
     
     init() {
         FirebaseApp.configure()
@@ -31,12 +30,6 @@ struct SlopTokApp: App {
                     .task {
                         // Start monitoring watch counts when signed in
                         await WatchCountCoordinator.shared.startMonitoring()
-                        
-                        // Generate test video if not already done
-                        if !hasGeneratedTestVideo {
-                            hasGeneratedTestVideo = true
-                            await PromptGenerationService.shared.generateTestVideo()
-                        }
                     }
             } else {
                 AuthView()

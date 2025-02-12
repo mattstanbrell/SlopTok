@@ -167,7 +167,7 @@ actor PromptGenerationService {
         case .success(let response):
             print("✅ Generated \(response.prompts.count) initial prompts")
             
-            // For now, only process the first prompt
+            // Process only the first prompt
             if let firstPrompt = response.prompts.first {
                 do {
                     print("🎨 Processing first prompt: \(firstPrompt.prompt)")
@@ -191,9 +191,6 @@ actor PromptGenerationService {
                     print("❌ Error processing prompt: \(error.localizedDescription)")
                 }
             }
-            
-            // TODO: Later we'll process all prompts
-            // try await generateVideosFromPrompts(response.prompts)
             
             return .success(response)
         case .failure(let error):
@@ -305,72 +302,14 @@ actor PromptGenerationService {
             let downloadURL = try await videoRef.downloadURL()
             print("📤 Successfully got download URL: \(downloadURL)")
             
-            // Add to beginning of feed
+            // Add to end of feed
             await MainActor.run {
-                VideoService.shared.insertVideoAtBeginning(videoId)
+                VideoService.shared.appendVideo(videoId)
             }
-            print("📤 Added video to beginning of feed: \(videoId)")
+            print("📤 Added video to end of feed: \(videoId)")
         } catch {
             print("❌ Upload failed with error: \(error)")
             throw error
-        }
-    }
-    
-    /// Generates a test video for development purposes
-    public func generateTestVideo() async {
-        print("🧪 Generating test video")
-        var videoURL: URL?
-        
-        do {
-            // Create a simple blue test image
-            let size = CGSize(width: 1080, height: 1920)
-            let renderer = UIGraphicsImageRenderer(size: size)
-            let image = renderer.image { context in
-                // Fill background with blue
-                UIColor.systemBlue.setFill()
-                context.fill(CGRect(origin: .zero, size: size))
-                
-                // Add some text for identification
-                let text = "Test Video"
-                let attributes: [NSAttributedString.Key: Any] = [
-                    .foregroundColor: UIColor.white,
-                    .font: UIFont.systemFont(ofSize: 48, weight: .bold)
-                ]
-                let textSize = text.size(withAttributes: attributes)
-                let textRect = CGRect(
-                    x: (size.width - textSize.width) / 2,
-                    y: (size.height - textSize.height) / 2,
-                    width: textSize.width,
-                    height: textSize.height
-                )
-                text.draw(in: textRect, withAttributes: attributes)
-            }
-            
-            // Convert to video
-            videoURL = try await ImageToVideoConverter.convertImageToVideo(
-                image: image,
-                duration: 3.0,
-                size: size
-            )
-            print("✅ Converted test image to video")
-            
-            guard let videoURL = videoURL else {
-                throw NSError(domain: "PromptGenerationService", code: -1, userInfo: [NSLocalizedDescriptionKey: "No video URL generated"])
-            }
-            
-            // Upload video with metadata
-            let prompt = PromptGeneration(prompt: "Test blue video", parentIds: nil)
-            try await uploadVideo(at: videoURL, prompt: prompt)
-            print("✅ Uploaded test video")
-            
-        } catch {
-            print("❌ Error generating test video: \(error)")
-        }
-        
-        // Clean up temporary video file only after everything is done
-        if let videoURL = videoURL {
-            try? FileManager.default.removeItem(at: videoURL)
-            print("🧹 Cleaned up temporary files")
         }
     }
 }
