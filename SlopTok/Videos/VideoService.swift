@@ -73,17 +73,24 @@ class VideoService: ObservableObject {
     
     /// Adds a video to the end of the feed
     func appendVideo(_ videoId: String) {
-        print("📹 VideoService - Appending video after seed videos")
-        // Find the last seed video index
-        if let lastSeedIndex = videos.lastIndex(where: { seedVideos.contains($0) }) {
-            // Insert after the last seed video
-            videos.insert(videoId, at: lastSeedIndex + 1)
+        print("📹 VideoService - Appending video to feed: \(videoId)")
+        // Find the last generated video index, or last seed video index if no generated videos
+        let insertIndex: Int
+        if let lastGeneratedIndex = videos.lastIndex(where: { generatedVideos.contains($0) }) {
+            // Insert after the last generated video
+            insertIndex = lastGeneratedIndex + 1
+        } else if let lastSeedIndex = videos.lastIndex(where: { seedVideos.contains($0) }) {
+            // No generated videos yet, insert after last seed video
+            insertIndex = lastSeedIndex + 1
         } else {
-            // If no seed videos found, append to beginning
-            videos.insert(videoId, at: 0)
+            // No videos at all, insert at beginning
+            insertIndex = 0
         }
+        
+        videos.insert(videoId, at: insertIndex)
         // Mark as generated video
         generatedVideos.insert(videoId)
+        print("📹 VideoService - Inserted video at index \(insertIndex)")
     }
     
     /// Adds a video to the beginning of the feed

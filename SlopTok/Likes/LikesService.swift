@@ -20,14 +20,13 @@ class LikesService: ObservableObject {
             let snapshot = try await db.collection("users")
                 .document(userId)
                 .collection("videoInteractions")
-                .whereField("liked", isEqualTo: true)
+                .whereField("liked_timestamp", isGreaterThan: Timestamp(date: Date(timeIntervalSince1970: 0)))
                 .getDocuments()
             
             let documents = snapshot.documents
             self.likedVideos = documents.compactMap { doc -> LikedVideo? in
-                // Use current timestamp if last_seen doesn't exist
-                let timestamp = (doc.data()["last_seen"] as? Timestamp) ?? Timestamp(date: Date())
-                return LikedVideo(id: doc.documentID, timestamp: timestamp.dateValue())
+                guard let likedTimestamp = doc.data()["liked_timestamp"] as? Timestamp else { return nil }
+                return LikedVideo(id: doc.documentID, timestamp: likedTimestamp.dateValue())
             }
             
             self.initialLoadCompleted = true
@@ -36,7 +35,7 @@ class LikesService: ObservableObject {
             db.collection("users")
                 .document(userId)
                 .collection("videoInteractions")
-                .whereField("liked", isEqualTo: true)
+                .whereField("liked_timestamp", isGreaterThan: Timestamp(date: Date(timeIntervalSince1970: 0)))
                 .addSnapshotListener { [weak self] querySnapshot, error in
                     guard let self = self,
                           let documents = querySnapshot?.documents else {
@@ -47,9 +46,8 @@ class LikesService: ObservableObject {
                     }
                     
                     self.likedVideos = documents.compactMap { doc -> LikedVideo? in
-                        // Use current timestamp if last_seen doesn't exist
-                        let timestamp = (doc.data()["last_seen"] as? Timestamp) ?? Timestamp(date: Date())
-                        return LikedVideo(id: doc.documentID, timestamp: timestamp.dateValue())
+                        guard let likedTimestamp = doc.data()["liked_timestamp"] as? Timestamp else { return nil }
+                        return LikedVideo(id: doc.documentID, timestamp: likedTimestamp.dateValue())
                     }
                 }
         } catch {
@@ -65,11 +63,17 @@ class LikesService: ObservableObject {
             .document(videoId)
         
         if isLiked(videoId: videoId) {
-            // Unlike - only update liked status
-            interactionRef.setData(["liked": false], merge: true)
+            // Unlike - remove liked status and timestamp
+            interactionRef.updateData([
+                "liked": false,
+                "liked_timestamp": FieldValue.delete()
+            ])
         } else {
-            // Like - only update liked status
-            interactionRef.setData(["liked": true], merge: true)
+            // Like - set liked status and timestamp
+            interactionRef.setData([
+                "liked": true,
+                "liked_timestamp": FieldValue.serverTimestamp()
+            ], merge: true)
         }
     }
     

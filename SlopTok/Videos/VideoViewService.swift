@@ -57,7 +57,8 @@ class VideoViewService {
                     .document("counts")
                 
                 batch.updateData([
-                    "videosWatchedSinceLastProfile": FieldValue.increment(Int64(1))
+                    "videosWatchedSinceLastProfile": FieldValue.increment(Int64(1)),
+                    "videosWatchedSinceLastPrompt": FieldValue.increment(Int64(1))
                 ], forDocument: watchCountsRef)
             }
             

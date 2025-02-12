@@ -2,8 +2,8 @@ import Foundation
 
 /// Represents the result of an LLM API call
 enum LLMResponse<T: Codable> {
-    /// Successful response with decoded data
-    case success(T)
+    /// Successful response with decoded data and raw content
+    case success(T, rawContent: String)
     /// Error during API call or decoding
     case failure(LLMError)
 }

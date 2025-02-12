@@ -166,17 +166,79 @@ actor PromptGenerationService {
         )
 
         switch promptResult {
-        case .success(let response):
-            print("✅ Generated \(response.prompts.count) initial prompts")
+        case let .success((response, rawContent)):
+            var allPrompts = response.prompts
             
-            // Process all prompts in parallel
-            do {
-                try await generateVideosFromPrompts(response.prompts)
-            } catch {
-                print("❌ Error processing prompts: \(error.localizedDescription)")
+            // Start processing initial prompts immediately
+            let processingTask = Task {
+                do {
+                    try await generateVideosFromPrompts(allPrompts)
+                } catch {
+                    print("❌ Error processing initial prompts: \(error.localizedDescription)")
+                }
             }
             
-            return .success(response)
+            // Request more prompts if needed
+            if allPrompts.count < 20 {
+                print("⚠️ Only received \(allPrompts.count) prompts, requesting \(20 - allPrompts.count) more in background")
+                
+                // Create conversation messages
+                let messages: [LLMMessage] = [
+                    LLMMessage(
+                        role: .system,
+                        content: "You are generating creative photo prompts that build upon successful prompts and user interests. Focus on creating prompts that will result in visually stunning still images with strong composition, lighting, and attention to detail. Be imaginative while maintaining high production value and visual appeal. Pay special attention to photographic elements like composition rules, lighting, depth of field, and color harmony."
+                    ),
+                    LLMMessage(
+                        role: .user,
+                        content: prompt // Original prompt with all context
+                    ),
+                    LLMMessage(
+                        role: .assistant,
+                        content: rawContent // Use exact content from LLM
+                    ),
+                    LLMMessage(
+                        role: .user,
+                        content: "Please generate \(20 - allPrompts.count) more prompts following the same guidelines and distribution as before. Make sure these new prompts are different from the ones above."
+                    )
+                ]
+                
+                print("\n📝 Message Chain for Additional Prompts:")
+                print("=== System Message ===")
+                print(messages[0].content)
+                print("\n=== Initial User Message ===")
+                print(messages[1].content)
+                print("\n=== Assistant Response ===")
+                print(messages[2].content)
+                print("\n=== Follow-up User Message ===")
+                print(messages[3].content)
+                print("\n===================\n")
+                
+                let additionalResult = await LLMService.shared.complete(
+                    messages: messages,
+                    responseType: PromptGenerationResponse.self,
+                    schema: PromptGenerationSchema.schema
+                )
+                
+                switch additionalResult {
+                case let .success((additionalResponse, _)):
+                    print("✅ Generated \(additionalResponse.prompts.count) additional prompts")
+                    // Process additional prompts
+                    do {
+                        try await generateVideosFromPrompts(additionalResponse.prompts)
+                        allPrompts.append(contentsOf: additionalResponse.prompts)
+                    } catch {
+                        print("❌ Error processing additional prompts: \(error.localizedDescription)")
+                    }
+                case .failure(let error):
+                    print("❌ Error generating additional prompts: \(error.description)")
+                }
+            }
+            
+            // Wait for initial prompts to finish processing
+            await processingTask.value
+            
+            print("✅ Generated \(allPrompts.count) total prompts")
+            return .success(PromptGenerationResponse(prompts: allPrompts), rawContent: rawContent)
         case .failure(let error):
             return .failure(error)
         }
@@ -215,7 +277,10 @@ actor PromptGenerationService {
                 }
                 
                 group.addTask { [weak self] in
-                    guard let self = self else { return nil }
+                    guard let self = self else { 
+                        throw NSError(domain: "PromptGenerationService", code: -1, 
+                                    userInfo: [NSLocalizedDescriptionKey: "Service was deallocated"])
+                    }
                     
                     defer {
                         semaphore.signal() // Release the slot when done
@@ -278,8 +343,7 @@ actor PromptGenerationService {
                             
                             return ProcessingResult(videoId: videoId, prompt: prompt)
                         } catch is CancellationError {
-                            print("❌ Task \(index + 1) was cancelled")
-                            return nil
+                            throw CancellationError()
                         } catch {
                             lastError = error
                             print("❌ Task \(index + 1) attempt \(attempt) failed: \(error.localizedDescription)")
@@ -291,8 +355,6 @@ actor PromptGenerationService {
                                 return nil
                             }
                             
-                            // Check for cancellation before retry delay
-                            try? Task.checkCancellation()
                             try? await Task.sleep(nanoseconds: UInt64(1_000_000_000 * Double(attempt + 1)))
                         }
                     }
@@ -300,19 +362,19 @@ actor PromptGenerationService {
                 }
             }
             
-            // Collect results as they complete
+            // Collect results and update feed in batches
             for try await result in group {
                 if let result = result {
-                    print("✨ Completed video: \(result.videoId)")
-                    completedVideoIds.append(result.videoId)
-                    
                     await MainActor.run {
+                        completedVideoIds.append(result.videoId)
+                        
+                        // First 5 videos added individually
                         if completedVideoIds.count <= 5 {
-                            // Add first 5 videos individually as they come in
                             print("📱 Adding video to feed (first 5): \(result.videoId)")
                             VideoService.shared.appendVideo(result.videoId)
-                        } else if completedVideoIds.count % 5 == 0 {
-                            // After first 5, add in batches of 5
+                        }
+                        // After first 5, add in batches of 5
+                        else if completedVideoIds.count % 5 == 0 {
                             let startIndex = completedVideoIds.count - 5
                             let batch = Array(completedVideoIds[startIndex..<completedVideoIds.count])
                             print("📱 Adding batch of \(batch.count) videos to feed")
@@ -324,7 +386,7 @@ actor PromptGenerationService {
                 }
             }
             
-            // Add any remaining videos (after first 5 and complete batches)
+            // Add any remaining videos
             await MainActor.run {
                 if completedVideoIds.count > 5 {
                     let remainingCount = (completedVideoIds.count - 5) % 5
@@ -350,23 +412,7 @@ actor PromptGenerationService {
                         print("   Error: \(failedPrompt.error.localizedDescription)")
                     }
                 }
-                
-                for (index, videoId) in completedVideoIds.enumerated() {
-                    print("  \(index + 1). \(videoId)")
-                }
             }
-        }
-        
-        // If no videos were successfully generated, throw an error
-        if completedVideoIds.isEmpty {
-            throw NSError(
-                domain: "PromptGenerationService",
-                code: -1,
-                userInfo: [
-                    NSLocalizedDescriptionKey: "Failed to generate any videos from \(prompts.count) prompts",
-                    "failedPromptsCount": failedPrompts.count
-                ]
-            )
         }
     }
 

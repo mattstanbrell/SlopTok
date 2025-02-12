@@ -50,7 +50,7 @@ class ProfileService: ObservableObject {
             let result = await ProfileGenerationService.shared.generateInitialProfile(likedVideos: likedVideos)
             
             switch result {
-            case .success(let response):
+            case let .success((response, _)):
                 // 3. Convert LLM response to interests
                 let interests = await ProfileGenerationService.shared.convertToInterests(response)
                 
@@ -74,7 +74,7 @@ class ProfileService: ObservableObject {
                     )
                     
                     switch promptResult {
-                    case .success(let response):
+                    case let .success((response, _)):
                         print("✅ Generated \(response.prompts.count) initial prompts")
                         // TODO: Store prompts when we implement that feature
                     case .failure(let error):

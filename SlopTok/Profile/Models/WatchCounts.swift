@@ -21,7 +21,7 @@ struct WatchCounts: Codable {
     init() {
         self.videosWatchedSinceLastPrompt = 0
         self.videosWatchedSinceLastProfile = 0
-        self.lastPromptGeneration = nil
+        self.lastPromptGeneration = Date(timeIntervalSince1970: 0)  // Start from Unix epoch
         self.lastProfileUpdate = nil
     }
     
@@ -34,7 +34,7 @@ struct WatchCounts: Codable {
         
         self.videosWatchedSinceLastPrompt = promptCount
         self.videosWatchedSinceLastProfile = profileCount
-        self.lastPromptGeneration = (data["lastPromptGeneration"] as? Timestamp)?.dateValue()
+        self.lastPromptGeneration = (data["lastPromptGeneration"] as? Timestamp)?.dateValue() ?? Date(timeIntervalSince1970: 0)
         self.lastProfileUpdate = (data["lastProfileUpdate"] as? Timestamp)?.dateValue()
     }
     
@@ -42,12 +42,10 @@ struct WatchCounts: Codable {
     var firestoreData: [String: Any] {
         var data: [String: Any] = [
             "videosWatchedSinceLastPrompt": videosWatchedSinceLastPrompt,
-            "videosWatchedSinceLastProfile": videosWatchedSinceLastProfile
+            "videosWatchedSinceLastProfile": videosWatchedSinceLastProfile,
+            "lastPromptGeneration": Timestamp(date: lastPromptGeneration ?? Date(timeIntervalSince1970: 0))
         ]
         
-        if let promptDate = lastPromptGeneration {
-            data["lastPromptGeneration"] = Timestamp(date: promptDate)
-        }
         if let profileDate = lastProfileUpdate {
             data["lastProfileUpdate"] = Timestamp(date: profileDate)
         }

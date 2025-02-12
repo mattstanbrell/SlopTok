@@ -1,5 +1,18 @@
 import Foundation
 
+/// Message in a conversation with the LLM
+public struct LLMMessage: Codable {
+    /// Role of the message sender
+    public enum Role: String, Codable {
+        case system
+        case user
+        case assistant
+    }
+    
+    public let role: Role
+    public let content: String
+}
+
 /// Service for making LLM API calls with structured responses
 actor LLMService {
     /// Shared instance for the service
@@ -19,25 +32,22 @@ actor LLMService {
         self.config = config
     }
     
-    /// Makes an LLM API call with structured response
+    /// Makes an LLM API call with structured response and conversation history
     /// - Parameters:
-    ///   - userPrompt: The main prompt to send to the LLM
-    ///   - systemPrompt: Optional system prompt to set context
+    ///   - messages: Array of messages in the conversation
     ///   - responseType: The expected response type (must conform to Codable)
     ///   - schema: JSON schema for the expected response
     /// - Returns: LLMResponse containing either the decoded response or an error
     func complete<T: Codable>(
-        userPrompt: String,
-        systemPrompt: String? = nil,
+        messages: [LLMMessage],
         responseType: T.Type,
         schema: String
     ) async -> LLMResponse<T> {
         // Log input
         print("\n🤖 LLM Request:")
-        if let systemPrompt = systemPrompt {
-            print("System: \(systemPrompt)")
+        for message in messages {
+            print("\(message.role): \(message.content)")
         }
-        print("User: \(userPrompt)")
         print("Schema: \(schema)")
         
         // Parse schema string into JSON object
@@ -46,14 +56,11 @@ actor LLMService {
             return .failure(.systemError(NSError(domain: "LLMService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid schema JSON"])))
         }
         
-        // Create the request body with parsed schema
-        var requestBody: [String: Any] = [
-            "prompt": userPrompt,
+        // Create the request body with parsed schema and messages
+        let requestBody: [String: Any] = [
+            "messages": messages.map { ["role": $0.role.rawValue, "content": $0.content] },
             "schema": schemaJson
         ]
-        if let systemPrompt = systemPrompt {
-            requestBody["systemPrompt"] = systemPrompt
-        }
         
         do {
             var request = URLRequest(url: workerURL)
@@ -83,12 +90,12 @@ actor LLMService {
                let content = openAIResponse.choices.first?.message.content,
                let jsonData = content.data(using: .utf8) {
                 let decoded = try JSONDecoder().decode(responseType, from: jsonData)
-                return .success(decoded)
+                return .success(decoded, rawContent: content)
             }
             
             // Try direct decoding if the response is already in the expected format
             let decoded = try JSONDecoder().decode(responseType, from: data)
-            return .success(decoded)
+            return .success(decoded, rawContent: String(data: data, encoding: .utf8) ?? "")
             
         } catch {
             print("❌ LLM Error: \(error.localizedDescription)")
@@ -96,19 +103,28 @@ actor LLMService {
         }
     }
     
-    /// Convenience method for single-prompt requests
+    /// Convenience method for simple prompts (creates a single user message)
     /// - Parameters:
-    ///   - prompt: The user prompt
+    ///   - userPrompt: The user prompt
+    ///   - systemPrompt: Optional system prompt
     ///   - responseType: The expected response type (must conform to Codable)
     ///   - schema: JSON schema for the expected response
     /// - Returns: LLMResponse containing either the decoded response or an error
     func complete<T: Codable>(
-        prompt: String,
+        userPrompt: String,
+        systemPrompt: String? = nil,
         responseType: T.Type,
         schema: String
     ) async -> LLMResponse<T> {
-        await complete(
-            userPrompt: prompt,
+        var messages: [LLMMessage] = []
+        
+        if let systemPrompt = systemPrompt {
+            messages.append(LLMMessage(role: .system, content: systemPrompt))
+        }
+        messages.append(LLMMessage(role: .user, content: userPrompt))
+        
+        return await complete(
+            messages: messages,
             responseType: responseType,
             schema: schema
         )

@@ -42,16 +42,28 @@ class WatchCountCoordinator: ObservableObject {
                   let data = snapshot?.data(),
                   let watchCounts = WatchCounts(from: data) else { return }
             
+            print("📊 Watch Counts Update:")
+            print("  Videos since last prompt: \(watchCounts.videosWatchedSinceLastPrompt)")
+            print("  Videos since last profile: \(watchCounts.videosWatchedSinceLastProfile)")
+            print("  Last profile update: \(watchCounts.lastProfileUpdate?.description ?? "nil")")
+            print("  Last prompt generation: \(watchCounts.lastPromptGeneration?.description ?? "nil")")
+            
             Task {
                 // Check if we need initial profile creation
                 if watchCounts.lastProfileUpdate == nil && 
                    watchCounts.videosWatchedSinceLastProfile >= self.seedVideoCount {
+                    print("🎯 Triggering initial profile creation")
                     await self.triggerInitialProfile(userId: userId)
                 }
                 // Check if we need to generate new prompts
                 else if watchCounts.lastProfileUpdate != nil &&
                         watchCounts.videosWatchedSinceLastPrompt >= self.promptGenerationThreshold {
+                    print("🎯 Triggering prompt generation - Threshold reached")
                     await self.triggerPromptGeneration(userId: userId)
+                } else {
+                    print("⏳ Not triggering prompt generation:")
+                    print("  Has profile? \(watchCounts.lastProfileUpdate != nil)")
+                    print("  Videos needed: \(self.promptGenerationThreshold - watchCounts.videosWatchedSinceLastPrompt)")
                 }
                 // // Profile updates will be implemented later
                 // else if watchCounts.lastProfileUpdate != nil && 
@@ -71,7 +83,9 @@ class WatchCountCoordinator: ObservableObject {
             .document("counts")
             .updateData([
                 "videosWatchedSinceLastProfile": 0,
-                "lastProfileUpdate": FieldValue.serverTimestamp()
+                "videosWatchedSinceLastPrompt": 0,
+                "lastProfileUpdate": FieldValue.serverTimestamp(),
+                "lastPromptGeneration": FieldValue.serverTimestamp()
             ])
             
         await ProfileService.shared.createInitialProfile()
@@ -81,15 +95,7 @@ class WatchCountCoordinator: ObservableObject {
     private func triggerPromptGeneration(userId: String) async {
         // Get liked videos since last prompt generation
         do {
-            // Reset the counter first to prevent duplicate triggers
-            try await db.collection("users")
-                .document(userId)
-                .collection("watchCounts")
-                .document("counts")
-                .updateData([
-                    "videosWatchedSinceLastPrompt": 0,
-                    "lastPromptGeneration": FieldValue.serverTimestamp()
-                ])
+            print("🎬 Starting prompt generation process...")
             
             // Get liked videos since last prompt generation
             let lastGeneration = try await db.collection("users")
@@ -98,34 +104,63 @@ class WatchCountCoordinator: ObservableObject {
                 .document("counts")
                 .getDocument()
                 .data()?["lastPromptGeneration"] as? Timestamp
+            print("📅 Last generation timestamp: \(lastGeneration?.dateValue().description ?? "nil")")
             
             let interactions = try await db.collection("users")
                 .document(userId)
                 .collection("videoInteractions")
-                .whereField("liked", isEqualTo: true)
-                .whereField("timestamp", isGreaterThan: lastGeneration ?? Timestamp(date: Date(timeIntervalSince1970: 0)))
+                .whereField("liked_timestamp", isGreaterThan: lastGeneration ?? Timestamp(date: Date(timeIntervalSince1970: 0)))
                 .getDocuments()
+            print("🔍 Found \(interactions.documents.count) liked videos since last generation")
             
             // Extract prompts from liked videos
             let likedVideos = interactions.documents.compactMap { doc -> (id: String, prompt: String)? in
                 guard let prompt = doc.data()["prompt"] as? String else { return nil }
                 return (id: doc.documentID, prompt: prompt)
             }
+            print("📝 Extracted \(likedVideos.count) prompts from liked videos")
             
             // Generate new prompts if we have any liked videos
-            if !likedVideos.isEmpty, let profile = await ProfileService.shared.currentProfile {
-                let promptResult = await PromptGenerationService.shared.generatePrompts(
-                    likedVideos: likedVideos,
-                    profile: profile
-                )
-                
-                switch promptResult {
-                case .success(let response):
-                    print("✅ Generated \(response.prompts.count) new prompts")
-                    // TODO: Store prompts when we implement that feature
-                case .failure(let error):
-                    print("❌ Error generating prompts: \(error.description)")
+            if !likedVideos.isEmpty {
+                print("👤 Fetching current profile...")
+                if let profile = await ProfileService.shared.currentProfile {
+                    print("✅ Got profile, generating prompts...")
+                    let promptResult = await PromptGenerationService.shared.generatePrompts(
+                        likedVideos: likedVideos,
+                        profile: profile
+                    )
+                    
+                    switch promptResult {
+                    case let .success((response, _)):
+                        print("🎉 Successfully generated \(response.prompts.count) new prompts")
+                        // Reset counters and update timestamp only after successful generation
+                        try await db.collection("users")
+                            .document(userId)
+                            .collection("watchCounts")
+                            .document("counts")
+                            .updateData([
+                                "videosWatchedSinceLastPrompt": 0,
+                                "lastPromptGeneration": FieldValue.serverTimestamp()
+                            ])
+                        print("✅ Reset watch counts and updated timestamp")
+                    case .failure(let error):
+                        print("❌ Error generating prompts: \(error.description)")
+                    }
+                } else {
+                    print("❌ Failed to get current profile")
                 }
+            } else {
+                print("⚠️ No liked videos found since last generation, skipping prompt generation")
+                // Still reset the counter to prevent getting stuck
+                try await db.collection("users")
+                    .document(userId)
+                    .collection("watchCounts")
+                    .document("counts")
+                    .updateData([
+                        "videosWatchedSinceLastPrompt": 0,
+                        "lastPromptGeneration": FieldValue.serverTimestamp()
+                    ])
+                print("✅ Reset watch counts and updated timestamp")
             }
         } catch {
             print("❌ Error during prompt generation: \(error)")
