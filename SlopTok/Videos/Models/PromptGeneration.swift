@@ -1,8 +1,8 @@
 import Foundation
 
-/// Single generated video prompt with optional parent information
+/// Single generated image prompt with optional parent information
 struct PromptGeneration: Codable {
-    /// The generated video prompt
+    /// The generated image prompt
     let prompt: String
     
     /// IDs of parent prompts that influenced this generation
@@ -11,7 +11,7 @@ struct PromptGeneration: Codable {
     let parentIds: [String]?
 }
 
-/// Response from LLM for generating new video prompts
+/// Response from LLM for generating new image prompts
 struct PromptGenerationResponse: Codable {
     /// The array of generated prompts
     let prompts: [PromptGeneration]

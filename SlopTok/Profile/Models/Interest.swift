@@ -30,7 +30,7 @@ struct Interest: Codable, Identifiable {
     /// Rock Climbing: ["bouldering problems", "sport climbing routes", "climbing techniques"]
     /// Trail Running: ["technical trails", "ultrarunning", "trail gear"]
     /// ```
-    let examples: [String]
+    var examples: [String]
     
     /// When this interest was last updated
     var lastUpdated: Date

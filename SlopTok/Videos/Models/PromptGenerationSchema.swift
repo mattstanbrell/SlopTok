@@ -14,7 +14,7 @@ enum PromptGenerationSchema {
                     "properties": {
                         "prompt": {
                             "type": "string",
-                            "description": "The generated video prompt"
+                            "description": "The generated image prompt"
                         },
                         "parentIds": {
                             "type": "array",
@@ -22,7 +22,6 @@ enum PromptGenerationSchema {
                                 "type": "string",
                                 "description": "ID of a parent prompt"
                             },
-                            "maxItems": 2,
                             "description": "IDs of parent prompts (1 for mutation, 2 for crossover)"
                         }
                     },

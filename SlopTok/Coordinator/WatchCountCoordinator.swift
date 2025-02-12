@@ -13,6 +13,9 @@ class WatchCountCoordinator: ObservableObject {
     /// Number of videos to watch before generating new prompts
     private let promptGenerationThreshold = 20
     
+    /// Number of videos to watch before updating profile
+    private let profileUpdateThreshold = 50
+    
     private init() {}
     
     /// Ensures watch counts document exists and starts monitoring
@@ -60,16 +63,18 @@ class WatchCountCoordinator: ObservableObject {
                         watchCounts.videosWatchedSinceLastPrompt >= self.promptGenerationThreshold {
                     print("🎯 Triggering prompt generation - Threshold reached")
                     await self.triggerPromptGeneration(userId: userId)
-                } else {
-                    print("⏳ Not triggering prompt generation:")
-                    print("  Has profile? \(watchCounts.lastProfileUpdate != nil)")
-                    print("  Videos needed: \(self.promptGenerationThreshold - watchCounts.videosWatchedSinceLastPrompt)")
                 }
-                // // Profile updates will be implemented later
-                // else if watchCounts.lastProfileUpdate != nil && 
-                //         watchCounts.videosWatchedSinceLastProfile >= 50 {
-                //     await self.triggerProfileUpdate(userId: userId)
-                // }
+                // Check if we need to update profile
+                else if watchCounts.lastProfileUpdate != nil && 
+                        watchCounts.videosWatchedSinceLastProfile >= self.profileUpdateThreshold {
+                    print("🎯 Triggering profile update - Threshold reached")
+                    await self.triggerProfileUpdate(userId: userId)
+                } else {
+                    print("⏳ Not triggering updates:")
+                    print("  Has profile? \(watchCounts.lastProfileUpdate != nil)")
+                    print("  Videos needed for prompts: \(self.promptGenerationThreshold - watchCounts.videosWatchedSinceLastPrompt)")
+                    print("  Videos needed for profile: \(self.profileUpdateThreshold - watchCounts.videosWatchedSinceLastProfile)")
+                }
             }
         }
     }
@@ -167,17 +172,20 @@ class WatchCountCoordinator: ObservableObject {
         }
     }
     
-    // // Profile updates will be implemented later
-    // private func triggerProfileUpdate(userId: String) async {
-    //     try? await db.collection("users")
-    //         .document(userId)
-    //         .collection("watchCounts")
-    //         .document("counts")
-    //         .updateData([
-    //             "videosWatchedSinceLastProfile": 0,
-    //             "lastProfileUpdate": FieldValue.serverTimestamp()
-    //         ])
-    //     
-    //     await ProfileService.shared.updateProfile()
-    // }
+    /// Triggers profile update after threshold is reached
+    private func triggerProfileUpdate(userId: String) async {
+        print("🔄 Starting profile update process...")
+        
+        // Reset the counter first to prevent duplicate triggers
+        try? await db.collection("users")
+            .document(userId)
+            .collection("watchCounts")
+            .document("counts")
+            .updateData([
+                "videosWatchedSinceLastProfile": 0,
+                "lastProfileUpdate": FieldValue.serverTimestamp()
+            ])
+        
+        await ProfileService.shared.updateProfile()
+    }
 } 

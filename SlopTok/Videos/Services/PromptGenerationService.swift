@@ -146,10 +146,10 @@ actor PromptGenerationService {
                     "parentIds": ["abc123", "def456"]  // Crossover example
                 },
                 {
-                    "prompt": "An extreme close-up of a professional rock climber's chalk-covered hands gripping a vividly colored climbing hold, shot with the same macro photography style and attention to detail as the strawberry-hummingbird. Each grain of chalk and texture in the skin is captured with razor-sharp focus, while the climbing gym's colorful walls create a beautiful bokeh background. The lighting is dramatic and professional, highlighting the tension in the grip and the interplay of textures" // Profile-based example
+                    "prompt": "An extreme close-up of a professional rock climber's chalk-covered hands gripping a vividly colored climbing hold, shot with the same macro photography style and attention to detail. Each grain of chalk and texture in the skin is captured with razor-sharp focus, while the climbing gym's colorful walls create a beautiful bokeh background. The lighting is dramatic and professional, highlighting the tension in the grip and the interplay of textures" // Profile-based example
                 },
                 {
-                    "prompt": "An otherworldly scene captured through a crystalline prism: a bioluminescent jellyfish floating through a field of suspended diamond dust in zero gravity. Each particle catches and refracts light differently, creating a mesmerizing rainbow spectrum. Shot in ultra-high resolution with cutting-edge microscopy techniques, revealing both the delicate translucent tissues of the jellyfish and the geometric perfection of each suspended crystal" // Random exploration example
+                    "prompt": "An otherworldly scene captured through a crystalline prism: a bioluminescent jellyfish floating through a field of suspended diamond dust. Each particle catches and refracts light differently, creating a mesmerizing rainbow spectrum. Shot in ultra-high resolution with cutting-edge microscopy techniques, revealing both the delicate translucent tissues of the jellyfish and the geometric perfection of each suspended crystal" // Random exploration example
                 }
             ]
         }

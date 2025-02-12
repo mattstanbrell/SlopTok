@@ -76,7 +76,6 @@ class ProfileService: ObservableObject {
                     switch promptResult {
                     case let .success((response, _)):
                         print("✅ Generated \(response.prompts.count) initial prompts")
-                        // TODO: Store prompts when we implement that feature
                     case .failure(let error):
                         print("❌ Error generating initial prompts: \(error.description)")
                     }
@@ -175,31 +174,65 @@ class ProfileService: ObservableObject {
         }
     }
     
-    /// Increments video watch counts and triggers profile/prompt updates if needed
-    func incrementWatchCounts() async {
+    /// Updates the profile based on recent video interactions
+    func updateProfile() async {
         guard let userId = Auth.auth().currentUser?.uid else { return }
         
-        // Increment counts
-        watchCounts.videosWatchedSinceLastPrompt += 1
-        watchCounts.videosWatchedSinceLastProfile += 1
-        
-        // Update Firestore
         do {
-            try await db.collection("users")
+            // Get liked videos since last profile update
+            let lastUpdate = try await db.collection("users")
                 .document(userId)
                 .collection("watchCounts")
                 .document("counts")
-                .setData(watchCounts.firestoreData)
+                .getDocument()
+                .data()?["lastProfileUpdate"] as? Timestamp
+            print("📅 Last profile update timestamp: \(lastUpdate?.dateValue().description ?? "nil")")
             
-            // TODO: Trigger profile/prompt updates when counts reach thresholds
+            let interactions = try await db.collection("users")
+                .document(userId)
+                .collection("videoInteractions")
+                .whereField("liked_timestamp", isGreaterThan: lastUpdate ?? Timestamp(date: Date(timeIntervalSince1970: 0)))
+                .getDocuments()
+            print("🔍 Found \(interactions.documents.count) liked videos since last profile update")
             
+            // Extract prompts from liked videos
+            let likedVideos = interactions.documents.compactMap { doc -> (id: String, prompt: String)? in
+                guard let prompt = doc.data()["prompt"] as? String else { return nil }
+                return (id: doc.documentID, prompt: prompt)
+            }
+            print("📝 Extracted \(likedVideos.count) prompts from liked videos")
+            
+            // Generate updated profile if we have any liked videos
+            if !likedVideos.isEmpty {
+                print("✨ Generating updated profile...")
+                let profileResult = await ProfileGenerationService.shared.generateUpdatedProfile(likedVideos: likedVideos)
+                
+                switch profileResult {
+                case let .success((response, _)):
+                    print("🎉 Successfully generated updated profile")
+                    // Convert LLM response to interests
+                    let interests = await ProfileGenerationService.shared.convertToInterests(response)
+                    
+                    // Create and store profile
+                    let profile = UserProfile(
+                        interests: interests,
+                        description: response.description
+                    )
+                    
+                    // Store in Firestore
+                    try await storeProfile(profile)
+                    
+                    // Update local state
+                    self.currentProfile = profile
+                    
+                case .failure(let error):
+                    print("❌ Error generating updated profile: \(error.description)")
+                }
+            } else {
+                print("⚠️ No liked videos found since last update, skipping profile update")
+            }
         } catch {
-            print("❌ Error updating watch counts: \(error)")
+            print("❌ Error updating profile: \(error)")
         }
-    }
-    
-    /// Updates the profile based on recent video interactions
-    func updateProfile() async {
-        // TODO: Implement profile updates
     }
 } 

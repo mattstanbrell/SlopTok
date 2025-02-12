@@ -1,3 +1,7 @@
 // IMPORTANT: Never create new files for Firebase rules
 // Instead, output them directly in the conversation for easy copy/paste into the Firebase console
 // This is because Firebase rules need to be manually updated in the Firebase Console UI
+
+// IMPORTANT: Even though we store things in "videos/" and have video-related naming,
+// we are currently only generating static images that get converted to 3-second videos.
+// All LLM prompts should refer to "images" not "videos" and avoid video-specific language.

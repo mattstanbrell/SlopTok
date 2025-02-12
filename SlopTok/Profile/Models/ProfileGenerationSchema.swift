@@ -5,39 +5,43 @@ enum ProfileGenerationSchema {
     /// The schema that enforces the structure of ProfileGenerationResponse
     static let schema = """
     {
-        "type": "object",
-        "properties": {
-            "interests": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "topic": {
-                            "type": "string",
-                            "description": "The main topic of interest"
-                        },
-                        "examples": {
-                            "type": "array",
-                            "items": {
+        "name": "profile_generation",
+        "description": "Response format for generating a user profile based on their image preferences",
+        "strict": true,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "interests": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "topic": {
                                 "type": "string",
-                                "description": "Specific activities or aspects within the topic"
+                                "description": "The main topic of interest identified from the user's liked images"
                             },
-                            "description": "Examples of specific activities or aspects"
-                        }
+                            "examples": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "description": "A specific example of this interest seen in the liked images"
+                                },
+                                "description": "Examples of this interest seen in the liked images, such as specific subjects, styles, or techniques"
+                            }
+                        },
+                        "required": ["topic", "examples"],
+                        "additionalProperties": false
                     },
-                    "required": ["topic", "examples"],
-                    "additionalProperties": false
+                    "description": "List of identified interests based on image preferences"
                 },
-                "description": "List of identified interests"
+                "description": {
+                    "type": "string",
+                    "description": "Natural language description of the user's visual preferences and interests"
+                }
             },
-            "description": {
-                "type": "string",
-                "description": "Natural language description of the user's overall profile"
-            }
-        },
-        "required": ["interests", "description"],
-        "additionalProperties": false,
-        "strict": true
+            "required": ["interests", "description"],
+            "additionalProperties": false
+        }
     }
     """
 } 
