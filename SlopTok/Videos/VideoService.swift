@@ -1,10 +1,13 @@
 import Foundation
 import FirebaseStorage
+import FirebaseFirestore
+import FirebaseAuth
 
 @MainActor
 class VideoService: ObservableObject {
     static let shared = VideoService()
     private let storage = Storage.storage()
+    private let db = Firestore.firestore()
     @Published private(set) var videos: [String] = []
     @Published private(set) var isLoading = false
     @Published private(set) var error: Error?
@@ -20,6 +23,20 @@ class VideoService: ObservableObject {
         error = nil
         
         do {
+            // Get current user's ID
+            guard let userId = Auth.auth().currentUser?.uid else {
+                isLoading = false
+                return
+            }
+            
+            // Get list of videos user has already seen
+            let seenVideosSnapshot = try await db.collection("users")
+                .document(userId)
+                .collection("videoInteractions")
+                .getDocuments()
+            
+            let seenVideoIds = Set(seenVideosSnapshot.documents.map { $0.documentID })
+            
             // Load seed videos first
             let seedRef = storage.reference().child("videos/seed")
             let seedResult = try await seedRef.listAll()
@@ -40,9 +57,12 @@ class VideoService: ObservableObject {
             seedVideos = Set(seedVideoIds)
             generatedVideos = Set(generatedVideoIds)
             
-            // Combine with seed videos first, then generated videos
-            videos = seedVideoIds + generatedVideoIds
-            print("📹 VideoService - Loaded \(videos.count) videos (\(seedVideoIds.count) seed, \(generatedVideoIds.count) generated)")
+            // Filter out seen videos and combine seed videos first, then generated videos
+            let unseenSeedVideos = seedVideoIds.filter { !seenVideoIds.contains($0) }
+            let unseenGeneratedVideos = generatedVideoIds.filter { !seenVideoIds.contains($0) }
+            
+            videos = unseenSeedVideos + unseenGeneratedVideos
+            print("📹 VideoService - Loaded \(videos.count) unseen videos (\(unseenSeedVideos.count) seed, \(unseenGeneratedVideos.count) generated)")
         } catch {
             self.error = error
             print("❌ VideoService - Error loading videos: \(error)")
