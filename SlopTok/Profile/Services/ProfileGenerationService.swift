@@ -76,6 +76,33 @@ actor ProfileGenerationService {
         let matches: [Match]
     }
     
+    /// Schema for semantic matching
+    private let semanticMatchSchema = """
+    {
+        "type": "object",
+        "properties": {
+            "matches": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "oldTopic": {
+                            "type": "string",
+                            "description": "Topic from the existing profile"
+                        },
+                        "newTopic": {
+                            "type": "string",
+                            "description": "Semantically matching topic from the new profile"
+                        }
+                    },
+                    "required": ["oldTopic", "newTopic"]
+                }
+            }
+        },
+        "required": ["matches"]
+    }
+    """
+    
     /// Generates updated profile based on recent interactions
     /// - Parameter likedVideos: Array of prompts from images the user liked since last update
     /// - Returns: Generated profile or error
@@ -128,12 +155,173 @@ actor ProfileGenerationService {
         """
         
         // Call LLM
-        return await LLMService.shared.complete(
+        let result = await LLMService.shared.complete(
             userPrompt: prompt,
             systemPrompt: "You are analyzing image generation prompts to understand a user's visual interests and content preferences. Focus on the subjects, styles, and themes they engage with in visual content. You MUST output valid JSON matching the required schema.",
             responseType: ProfileGenerationResponse.self,
             schema: ProfileGenerationSchema.schema
         )
+        
+        // If we have a current profile, merge the interests
+        if case let .success((response, _)) = result,
+           let currentProfile = await ProfileService.shared.currentProfile {
+            return await mergeProfiles(newResponse: response, currentProfile: currentProfile)
+        }
+        
+        return result
+    }
+    
+    /// Merges new interests with existing profile, handling semantic matches and weight updates
+    private func mergeProfiles(newResponse: ProfileGenerationResponse, currentProfile: UserProfile) async -> LLMResponse<ProfileGenerationResponse> {
+        var mergedInterests: [Interest] = []
+        var unmatchedNewInterests = newResponse.interests
+        var unmatchedOldInterests = currentProfile.interests
+        
+        // 1. First handle exact string matches
+        for newInterest in newResponse.interests {
+            if let matchIndex = unmatchedOldInterests.firstIndex(where: { $0.topic == newInterest.topic }) {
+                let oldInterest = unmatchedOldInterests[matchIndex]
+                
+                // Merge examples and increase weight
+                var mergedInterest = oldInterest
+                mergedInterest.examples = Array(Set(oldInterest.examples + newInterest.examples))
+                mergedInterest.weight = min(1.0, oldInterest.weight + 0.1)
+                mergedInterest.lastUpdated = Date()
+                
+                mergedInterests.append(mergedInterest)
+                unmatchedOldInterests.remove(at: matchIndex)
+                if let newIndex = unmatchedNewInterests.firstIndex(where: { $0.topic == newInterest.topic }) {
+                    unmatchedNewInterests.remove(at: newIndex)
+                }
+            }
+        }
+        
+        // 2. Then use LLM for semantic matching of remaining interests
+        if !unmatchedOldInterests.isEmpty && !unmatchedNewInterests.isEmpty {
+            let oldInterestsFormatted = unmatchedOldInterests
+                .map { "- \($0.topic)" }
+                .joined(separator: "\n")
+            
+            let newInterestsFormatted = unmatchedNewInterests
+                .map { "- \($0.topic)" }
+                .joined(separator: "\n")
+            
+            let semanticPrompt = """
+            Identify any semantically matching topics between these two lists of interests.
+            Only match topics that mean the same thing but are written differently (e.g., "Mountain Biking" and "MTB").
+            Do not match topics that are merely related or similar.
+            
+            Existing interests:
+            \(oldInterestsFormatted)
+            
+            New interests:
+            \(newInterestsFormatted)
+            
+            Example response:
+            {
+                "matches": [
+                    {
+                        "oldTopic": "Mountain Biking",
+                        "newTopic": "MTB"
+                    }
+                ]
+            }
+            
+            If there are no semantic matches, return an empty matches array.
+            """
+            
+            let semanticResult = await LLMService.shared.complete(
+                userPrompt: semanticPrompt,
+                systemPrompt: "You are identifying semantically equivalent topics that are written differently. Only match topics that mean exactly the same thing.",
+                responseType: SemanticMatchResponse.self,
+                schema: semanticMatchSchema
+            )
+            
+            if case let .success((semanticResponse, _)) = semanticResult {
+                // Process semantic matches
+                for match in semanticResponse.matches {
+                    if let oldIndex = unmatchedOldInterests.firstIndex(where: { $0.topic == match.oldTopic }),
+                       let newIndex = unmatchedNewInterests.firstIndex(where: { $0.topic == match.newTopic }) {
+                        let oldInterest = unmatchedOldInterests[oldIndex]
+                        let newInterest = unmatchedNewInterests[newIndex]
+                        
+                        // Merge examples and increase weight
+                        var mergedInterest = oldInterest
+                        mergedInterest.examples = Array(Set(oldInterest.examples + newInterest.examples))
+                        mergedInterest.weight = min(1.0, oldInterest.weight + 0.1)
+                        mergedInterest.lastUpdated = Date()
+                        
+                        mergedInterests.append(mergedInterest)
+                        unmatchedOldInterests.remove(at: oldIndex)
+                        unmatchedNewInterests.remove(at: newIndex)
+                    }
+                }
+            }
+        }
+        
+        // 3. Handle remaining unmatched interests
+        
+        // Decrease weight of unmatched old interests
+        for var oldInterest in unmatchedOldInterests {
+            oldInterest.weight = max(0.0, oldInterest.weight - 0.1)
+            oldInterest.lastUpdated = Date()
+            if oldInterest.weight > 0 {
+                mergedInterests.append(oldInterest)
+            }
+        }
+        
+        // Add new interests with initial weight
+        for newInterest in unmatchedNewInterests {
+            let interest = Interest(topic: newInterest.topic, examples: newInterest.examples)
+            mergedInterests.append(interest)
+        }
+        
+        // 4. Generate updated description
+        let descriptionPrompt = """
+        Given this merged profile and the previous and new descriptions, create an updated description that reflects the user's current interests and how they've evolved.
+        
+        Previous description:
+        \(currentProfile.description)
+        
+        New description from recent interactions:
+        \(newResponse.description)
+        
+        Current interests:
+        \(mergedInterests.map { "- \($0.topic) (weight: \($0.weight))" }.joined(separator: "\n"))
+        
+        Create a natural description that:
+        1. Focuses on their strongest interests (higher weights)
+        2. Notes any significant changes or trends
+        3. Highlights what aspects of these topics they engage with
+        """
+        
+        let descriptionResult = await LLMService.shared.complete(
+            userPrompt: descriptionPrompt,
+            systemPrompt: "You are writing a natural description of a user's visual preferences and interests, focusing on their strongest interests and how they've evolved.",
+            responseType: String.self,
+            schema: """
+            {
+                "type": "string",
+                "description": "Natural language description of the user's interests"
+            }
+            """
+        )
+        
+        let updatedDescription = if case let .success((description, _)) = descriptionResult {
+            description
+        } else {
+            newResponse.description
+        }
+        
+        // Create merged response
+        let mergedResponse = ProfileGenerationResponse(
+            interests: mergedInterests.map { interest in
+                InterestGeneration(topic: interest.topic, examples: interest.examples)
+            },
+            description: updatedDescription
+        )
+        
+        return .success(mergedResponse, rawContent: "")
     }
     
     /// Converts LLM-generated interests into domain model interests
