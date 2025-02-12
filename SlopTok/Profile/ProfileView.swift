@@ -3,6 +3,7 @@ import FirebaseAuth
 import AVKit
 import FirebaseStorage
 import FirebaseFirestore
+import FirebaseVertexAI
 
 struct ProfileView: View {
     let userName: String
@@ -12,6 +13,9 @@ struct ProfileView: View {
     @State private var selectedTab = 0
     @State private var isSeeding = false
     @State private var isClearing = false
+    @State private var isAnalyzing = false
+    @State private var analysisResult: String?
+    @State private var showingAnalysis = false
     @Environment(\.dismiss) private var dismiss
     
     private var userPhotoURL: URL? {
@@ -108,6 +112,18 @@ struct ProfileView: View {
                             }
                         }
                         .disabled(isClearing)
+                        
+                        Button(action: analyzeProfile) {
+                            if isAnalyzing {
+                                ProgressView()
+                                    .tint(.blue)
+                            } else {
+                                Image(systemName: "wand.and.stars")
+                                    .foregroundColor(.blue.opacity(0.6))
+                                    .font(.system(size: 17, weight: .semibold))
+                            }
+                        }
+                        .disabled(isAnalyzing)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -124,6 +140,24 @@ struct ProfileView: View {
             await bookmarksService.loadBookmarkedVideos()
         }
         .presentationBackground(.thinMaterial)
+        .sheet(isPresented: $showingAnalysis) {
+            NavigationView {
+                ScrollView {
+                    Text(analysisResult ?? "")
+                        .padding()
+                }
+                .navigationTitle("Image Analysis")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") {
+                            showingAnalysis = false
+                        }
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+        }
     }
     
     private func signOut() {
@@ -251,7 +285,81 @@ struct ProfileView: View {
             isClearing = false
         }
     }
+    
+    private func analyzeProfile() {
+        Task {
+            isAnalyzing = true
+            do {
+                // Make sure liked videos are loaded
+                await likesService.loadLikedVideos()
+                
+                // Get five most recent liked videos
+                let sortedVideos = likesService.likedVideos.sorted { $0.timestamp > $1.timestamp }
+                let recentVideos = Array(sortedVideos.prefix(5))
+                
+                if recentVideos.count > 0 {
+                    var thumbnailImages: [(label: String, image: UIImage?)] = []
+                    
+                    // Get thumbnails for all videos
+                    for (index, video) in recentVideos.enumerated() {
+                        await withCheckedContinuation { continuation in
+                            ThumbnailGenerator.generateThumbnail(for: video.id) { image in
+                                if let _ = image {
+                                    let uiImage = ThumbnailCache.shared.getCachedUIImage(for: video.id)
+                                    thumbnailImages.append(("Image \(index + 1)", uiImage))
+                                }
+                                continuation.resume()
+                            }
+                        }
+                    }
+                    
+                    // Filter out any nil images and prepare for analysis
+                    let validImages = thumbnailImages.compactMap { label, image -> (label: String, image: UIImage)? in
+                        if let image = image {
+                            return (label: label, image: image)
+                        }
+                        return nil
+                    }
+                    
+                    if !validImages.isEmpty {
+                        let descriptions = validImages.map { "describe \($0.label)" }.joined(separator: ", then ")
+                        let result = try await VertexAIService.shared.generateContentForFive(
+                            images: validImages,
+                            prompt: descriptions
+                        )
+                        analysisResult = result
+                    } else {
+                        analysisResult = "Could not load any thumbnails for the recent liked videos"
+                    }
+                } else {
+                    analysisResult = "No liked videos found"
+                }
+                showingAnalysis = true
+            } catch {
+                print("❌ Error analyzing images: \(error)")
+                analysisResult = "Error: \(error.localizedDescription)"
+                showingAnalysis = true
+            }
+            isAnalyzing = false
+        }
+    }
 }
 
 // Model to hold a static snapshot of videos for the player
+
+extension Image {
+    func asUIImage() -> UIImage? {
+        let controller = UIHostingController(rootView: self)
+        let view = controller.view
+        
+        let targetSize = controller.view.intrinsicContentSize
+        view?.bounds = CGRect(origin: .zero, size: targetSize)
+        view?.backgroundColor = .clear
+        
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        return renderer.image { _ in
+            view?.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+        }
+    }
+}
  

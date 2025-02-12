@@ -37,6 +37,20 @@ class ThumbnailCache {
         return nil
     }
     
+    // Returns the underlying UIImage if available
+    func getCachedUIImage(for key: String) -> UIImage? {
+        let now = Date()
+        let nsKey = key as NSString
+        if let cached = cache.object(forKey: nsKey) {
+            if now.timeIntervalSince(cached.date) < expirationInterval {
+                return cached.uiImage
+            } else {
+                cache.removeObject(forKey: nsKey)
+            }
+        }
+        return nil
+    }
+    
     // Accepts a UIImage and caches it.
     func setThumbnail(_ image: UIImage, for key: String) {
         let cached = CachedThumbnail(uiImage: image, date: Date())
