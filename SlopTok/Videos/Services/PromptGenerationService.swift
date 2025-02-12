@@ -3,6 +3,48 @@ import AVFoundation
 import FirebaseStorage
 import SwiftUI
 
+/// Helper for exponential backoff retries
+private struct RetryHelper {
+    /// Maximum number of retries
+    static let maxRetries = 3
+    
+    /// Executes a task with exponential backoff retries
+    /// - Parameters:
+    ///   - operation: The async operation to retry
+    ///   - shouldRetry: Closure that determines if an error should trigger a retry
+    /// - Returns: The operation result
+    static func retry<T>(
+        operation: () async throws -> T,
+        shouldRetry: (Error) -> Bool = { _ in true }
+    ) async throws -> T {
+        var lastError: Error?
+        
+        for attempt in 0...maxRetries {
+            do {
+                if attempt > 0 {
+                    // Exponential backoff: 1s, 2s, 4s
+                    let delay = pow(2.0, Double(attempt - 1))
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    print("🔄 Retry attempt \(attempt) after \(delay)s delay")
+                }
+                return try await operation()
+            } catch {
+                lastError = error
+                if !shouldRetry(error) || attempt == maxRetries {
+                    throw error
+                }
+                print("❌ Attempt \(attempt) failed: \(error.localizedDescription)")
+            }
+        }
+        
+        throw lastError ?? NSError(
+            domain: "RetryHelper",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "Unknown error during retry"]
+        )
+    }
+}
+
 /// Service responsible for generating new video prompts using LLM
 actor PromptGenerationService {
     /// Shared instance
@@ -56,6 +98,261 @@ actor PromptGenerationService {
         }
     }
     
+    /// Generate mutation prompts from liked prompts
+    private func generateMutationPrompts(
+        count: Int,
+        likedVideos: [(id: String, prompt: String)],
+        profile: UserProfile
+    ) async throws -> [PromptGeneration] {
+        let formattedPrompts = likedVideos
+            .map { "- \($0.prompt) (ID: \($0.id))" }
+            .joined(separator: "\n")
+        
+        let formattedInterests = profile.interests
+            .map { interest in
+                """
+                - \(interest.topic):
+                  Examples: \(interest.examples.joined(separator: ", "))
+                """
+            }
+            .joined(separator: "\n")
+        
+        let prompt = """
+        Generate \(count) new image prompts by mutating these prompts the user liked.
+        Each new prompt should be a variation of ONE parent prompt, keeping its core theme but varying elements like:
+        - The specific subject or focal point
+        - The visual style and composition
+        - The environment or setting
+        - The lighting and atmosphere
+        - The perspective and framing
+        - The artistic technique or medium
+        - The color palette and tones
+        
+        Liked image prompts:
+        \(formattedPrompts)
+        
+        User's interests for context:
+        \(formattedInterests)
+        User description: \(profile.description)
+        
+        Focus on creating prompts that will generate stunning, high-quality images. Consider:
+        - Strong composition (rule of thirds, leading lines, etc.)
+        - Lighting and shadows
+        - Focus and detail
+        - Texture and materials
+        - Color harmony
+        - Visual storytelling through a single frame
+        - Artistic style (photorealistic, stylized, illustrated, etc.)
+        
+        Example good prompt:
+        "A close-up, macro photography stock photo of a strawberry intricately sculpted into the shape of a hummingbird in mid-flight, its wings a blur as it sips nectar from a vibrant, tubular flower. The backdrop features a lush, colorful garden with a soft, bokeh effect, creating a dreamlike atmosphere. The image is exceptionally detailed and captured with a shallow depth of field, ensuring a razor-sharp focus on the strawberry-hummingbird and gentle fading of the background. The high resolution, professional photographers style, and soft lighting illuminate the scene in a very detailed manner, professional color grading amplifies the vibrant colors and creates an image with exceptional clarity. The depth of field makes the hummingbird and flower stand out starkly against the bokeh background."
+        
+        Example mutation:
+        {
+            "prompts": [
+                {
+                    "prompt": "A close-up, macro photography capture of the same strawberry-hummingbird now illuminated by moonlight, creating an ethereal night garden scene. Tiny dewdrops glisten on its carved feathers, catching the moonlight like diamonds. The background garden is bathed in cool blue tones with fireflies providing points of warm light, their glow reflecting in the dewdrops. Shot with the same exceptional detail and shallow depth of field, but now emphasizing the interplay of light and shadow in the nocturnal setting",
+                    "parentId": "abc123"
+                }
+            ]
+        }
+        
+        Each prompt MUST have exactly one parentId from the liked prompts.
+        Generate \(count) unique prompts.
+        """
+        
+        return try await RetryHelper.retry {
+            let result = await LLMService.shared.complete(
+                userPrompt: prompt,
+                systemPrompt: "You are generating creative photo prompts by mutating successful prompts. Focus on creating variations that maintain the core appeal while exploring new visual elements. Each prompt must be a mutation of exactly one parent prompt.",
+                responseType: PromptGenerationResponse.self,
+                schema: PromptGenerationSchema.mutationSchema
+            )
+            
+            switch result {
+            case .success((let response, _)):
+                return response.prompts
+            case .failure(let error):
+                throw error
+            }
+        }
+    }
+    
+    /// Generate crossover prompts from liked prompts
+    private func generateCrossoverPrompts(
+        count: Int,
+        likedVideos: [(id: String, prompt: String)],
+        profile: UserProfile
+    ) async throws -> [PromptGeneration] {
+        let formattedPrompts = likedVideos
+            .map { "- \($0.prompt) (ID: \($0.id))" }
+            .joined(separator: "\n")
+        
+        let formattedInterests = profile.interests
+            .map { interest in
+                """
+                - \(interest.topic):
+                  Examples: \(interest.examples.joined(separator: ", "))
+                """
+            }
+            .joined(separator: "\n")
+        
+        let prompt = """
+        Generate \(count) new image prompts by combining elements from pairs of prompts the user liked.
+        Each new prompt should creatively merge elements from TWO parent prompts, considering:
+        - How to meaningfully combine their subjects
+        - How to blend their visual styles
+        - How to merge their environments
+        - How to harmonize their lighting and atmosphere
+        - How to integrate their artistic techniques
+        - How to combine their color palettes
+        
+        Liked image prompts:
+        \(formattedPrompts)
+        
+        User's interests for context:
+        \(formattedInterests)
+        User description: \(profile.description)
+        
+        Focus on creating prompts that will generate stunning, high-quality images. Consider:
+        - Strong composition (rule of thirds, leading lines, etc.)
+        - Lighting and shadows
+        - Focus and detail
+        - Texture and materials
+        - Color harmony
+        - Visual storytelling through a single frame
+        - Artistic style (photorealistic, stylized, illustrated, etc.)
+        
+        Example good prompts for crossover:
+        1. "A close-up, macro photography stock photo of a strawberry intricately sculpted into the shape of a hummingbird in mid-flight, its wings a blur as it sips nectar from a vibrant, tubular flower..."
+        2. "A dramatic portrait of a dragon fruit carved into an Eastern dragon, with intricate scales catching the light, positioned against a misty mountainous backdrop..."
+        
+        Example crossover:
+        {
+            "prompts": [
+                {
+                    "prompt": "A masterfully executed fusion of two fruit sculptures: a strawberry hummingbird and a dragon fruit dragon, locked in an intricate aerial dance. The hummingbird's delicate form contrasts with the dragon's serpentine body, both captured in stunning macro detail. Professional lighting emphasizes the unique textures of each fruit, while the shallow depth of field creates a dreamy backdrop of a misty Chinese garden. The high-resolution capture ensures every carved scale and feather is crystal clear",
+                    "parentIds": ["abc123", "def456"]
+                }
+            ]
+        }
+        
+        Each prompt MUST have exactly two parentIds from the liked prompts.
+        Generate \(count) unique prompts.
+        """
+        
+        return try await RetryHelper.retry {
+            let result = await LLMService.shared.complete(
+                userPrompt: prompt,
+                systemPrompt: "You are generating creative photo prompts by combining elements from pairs of successful prompts. Focus on meaningful combinations that create compelling new visuals. Each prompt must combine exactly two parent prompts.",
+                responseType: PromptGenerationResponse.self,
+                schema: PromptGenerationSchema.crossoverSchema
+            )
+            
+            switch result {
+            case .success((let response, _)):
+                return response.prompts
+            case .failure(let error):
+                throw error
+            }
+        }
+    }
+    
+    /// Generate prompts based on user profile
+    private func generateProfileBasedPrompts(
+        count: Int,
+        profile: UserProfile
+    ) async throws -> [PromptGeneration] {
+        let formattedInterests = profile.interests
+            .map { interest in
+                """
+                - \(interest.topic):
+                  Examples: \(interest.examples.joined(separator: ", "))
+                """
+            }
+            .joined(separator: "\n")
+        
+        let prompt = """
+        Generate \(count) new image prompts based purely on this user's interests and preferences.
+        Create prompts that align with their interests but explore new subjects and styles.
+        
+        User's interests:
+        \(formattedInterests)
+        User description: \(profile.description)
+        
+        Focus on creating prompts that will generate stunning, high-quality images. Consider:
+        - Strong composition (rule of thirds, leading lines, etc.)
+        - Lighting and shadows
+        - Focus and detail
+        - Texture and materials
+        - Color harmony
+        - Visual storytelling through a single frame
+        - Artistic style (photorealistic, stylized, illustrated, etc.)
+        
+        Example prompt structure (unrelated to user's interests, just showing format):
+        "An extreme close-up of a professional rock climber's chalk-covered hands gripping a vividly colored climbing hold, shot with macro photography style and attention to detail. Each grain of chalk and texture in the skin is captured with razor-sharp focus, while the climbing gym's colorful walls create a beautiful bokeh background. The lighting is dramatic and professional, highlighting the tension in the grip and the interplay of textures"
+        
+        Generate \(count) unique prompts that match the user's interests, using the same high-quality prompt structure.
+        Do not include any parentIds in the response.
+        """
+        
+        return try await RetryHelper.retry {
+            let result = await LLMService.shared.complete(
+                userPrompt: prompt,
+                systemPrompt: "You are generating creative photo prompts based on a user's interests and preferences. Focus on creating prompts that align with their interests while maintaining high visual quality and appeal.",
+                responseType: PromptGenerationResponse.self,
+                schema: PromptGenerationSchema.profileBasedSchema
+            )
+            
+            switch result {
+            case .success((let response, _)):
+                return response.prompts
+            case .failure(let error):
+                throw error
+            }
+        }
+    }
+    
+    /// Generate random exploration prompts
+    private func generateRandomPrompts(count: Int) async throws -> [PromptGeneration] {
+        let prompt = """
+        Generate \(count) completely novel, creative image prompts for exploration.
+        These should be unique and unexpected, not tied to any existing prompts or user preferences.
+        
+        Focus on creating prompts that will generate stunning, high-quality images. Consider:
+        - Strong composition (rule of thirds, leading lines, etc.)
+        - Lighting and shadows
+        - Focus and detail
+        - Texture and materials
+        - Color harmony
+        - Visual storytelling through a single frame
+        - Artistic style (photorealistic, stylized, illustrated, etc.)
+        
+        Example good random prompts:
+        1. "An otherworldly scene captured through a crystalline prism: a bioluminescent jellyfish floating through a field of suspended diamond dust. Each particle catches and refracts light differently, creating a mesmerizing rainbow spectrum. Shot in ultra-high resolution with cutting-edge microscopy techniques, revealing both the delicate translucent tissues of the jellyfish and the geometric perfection of each suspended crystal"
+        2. "A surreal architectural photograph capturing the precise moment when a Baroque cathedral begins transforming into a living tree. The stone pillars flow like liquid into wooden trunks, while stained glass windows blossomed into leaves. Golden hour sunlight streams through the metamorphosing structure, creating an interplay of hard and soft shadows. Shot with a tilt-shift lens to maintain focus on the transformation point while softly blurring the edges"
+        
+        Generate \(count) unique prompts with similar quality and creativity.
+        Do not include any parentIds in the response.
+        """
+        
+        return try await RetryHelper.retry {
+            let result = await LLMService.shared.complete(
+                userPrompt: prompt,
+                systemPrompt: "You are generating creative photo prompts for pure exploration. Focus on creating unique and unexpected concepts while maintaining high visual quality and appeal.",
+                responseType: PromptGenerationResponse.self,
+                schema: PromptGenerationSchema.randomSchema
+            )
+            
+            switch result {
+            case .success((let response, _)):
+                return response.prompts
+            case .failure(let error):
+                throw error
+            }
+        }
+    }
+    
     /// Generates prompts based on seed videos
     /// - Parameters:
     ///   - likedVideos: Array of prompts from seed videos the user liked
@@ -67,180 +364,147 @@ actor PromptGenerationService {
     ) async -> LLMResponse<PromptGenerationResponse> {
         // Calculate prompt distribution
         let distribution = calculatePromptDistribution(likedCount: likedVideos.count)
+        print("📊 Prompt distribution:")
+        print("  - Mutations: \(distribution.mutationCount)")
+        print("  - Crossovers: \(distribution.crossoverCount)")
+        print("  - Profile-based: \(distribution.profileBasedCount)")
+        print("  - Exploration: \(distribution.explorationCount)")
         
-        // Format liked video prompts for readability
-        let formattedPrompts = likedVideos
-            .map { "- \($0.prompt) (ID: \($0.id))" }
-            .joined(separator: "\n")
+        // Track all generated prompts
+        var allPrompts: [PromptGeneration] = []
         
-        // Format profile interests for context
-        let formattedInterests = profile.interests
-            .map { interest in
-                """
-                - \(interest.topic):
-                  Examples: \(interest.examples.joined(separator: ", "))
-                """
-            }
-            .joined(separator: "\n")
-        
-        // Build the prompt
-        let prompt = """
-        Generate new image prompts based on these prompts for images the user liked and the user's profile.
-        
-        Liked image prompts:
-        \(formattedPrompts)
-        
-        User's interests:
-        \(formattedInterests)
-        User description: \(profile.description)
-        
-        Generate exactly 20 prompts with this precise distribution:
-        - \(distribution.mutationCount) mutations of any liked prompts
-        - \(distribution.crossoverCount) crossover prompts combining different pairs of liked prompts
-        - \(distribution.profileBasedCount) prompts based purely on the user's profile interests
-        - \(distribution.explorationCount) completely novel exploration prompts
-        
-        When creating prompts:
-        1. Vary elements like:
-           - The specific subject or focal point
-           - The visual style and composition
-           - The environment or setting
-           - The lighting and atmosphere
-           - The perspective and framing
-           - The artistic technique or medium
-           - The color palette and tones
-        
-        Focus on creating prompts that will generate stunning, high-quality images. Consider:
-        - Strong composition (rule of thirds, leading lines, etc.)
-        - Lighting and shadows
-        - Focus and detail
-        - Texture and materials
-        - Color harmony
-        - Visual storytelling through a single frame
-        - Artistic style (photorealistic, stylized, illustrated, etc.)
-
-        Risqué content (eg cleavage, tight clothing, etc) is ok, but avoid depicting actual nudity.
-
-        Prompt writing tips:
-        - Use precise descriptive language (e.g., "muted orange warm tones" vs "orange")
-        - Reference specific styles (e.g., "street photography", "movie still")
-        - For faces, use "portrait" and specify key details
-        - Compose for vertical phone viewing (9:16 aspect ratio, centered subjects)
-        
-        For mutations and crossovers, include the parent prompt IDs:
-        - Mutations should have one parent ID from the liked prompts
-        - Crossovers should have two parent IDs from the liked prompts
-        - Profile-based and novel prompts should have no parent IDs
-
-        Example good prompt: "A close-up, macro photography stock photo of a strawberry intricately sculpted into the shape of a hummingbird in mid-flight, its wings a blur as it sips nectar from a vibrant, tubular flower. The backdrop features a lush, colorful garden with a soft, bokeh effect, creating a dreamlike atmosphere. The image is exceptionally detailed and captured with a shallow depth of field, ensuring a razor-sharp focus on the strawberry-hummingbird and gentle fading of the background. The high resolution, professional photographers style, and soft lighting illuminate the scene in a very detailed manner, professional color grading amplifies the vibrant colors and creates an image with exceptional clarity. The depth of field makes the hummingbird and flower stand out starkly against the bokeh background."
-        
-        Example subset of a response (showing different prompt types):
-        {
-            "prompts": [
-                {
-                    "prompt": "A close-up, macro photography capture of the same strawberry-hummingbird now illuminated by moonlight, creating an ethereal night garden scene. Tiny dewdrops glisten on its carved feathers, catching the moonlight like diamonds. The background garden is bathed in cool blue tones with fireflies providing points of warm light, their glow reflecting in the dewdrops. Shot with the same exceptional detail and shallow depth of field, but now emphasizing the interplay of light and shadow in the nocturnal setting",
-                    "parentIds": ["abc123"]  // Mutation example
-                },
-                {
-                    "prompt": "A masterfully executed fusion of two fruit sculptures: a strawberry hummingbird and a dragon fruit dragon, locked in an intricate aerial dance. The hummingbird's delicate form contrasts with the dragon's serpentine body, both captured in stunning macro detail. Professional lighting emphasizes the unique textures of each fruit, while the shallow depth of field creates a dreamy backdrop of a misty Chinese garden. The high-resolution capture ensures every carved scale and feather is crystal clear",
-                    "parentIds": ["abc123", "def456"]  // Crossover example
-                },
-                {
-                    "prompt": "An extreme close-up of a professional rock climber's chalk-covered hands gripping a vividly colored climbing hold, shot with the same macro photography style and attention to detail. Each grain of chalk and texture in the skin is captured with razor-sharp focus, while the climbing gym's colorful walls create a beautiful bokeh background. The lighting is dramatic and professional, highlighting the tension in the grip and the interplay of textures" // Profile-based example
-                },
-                {
-                    "prompt": "An otherworldly scene captured through a crystalline prism: a bioluminescent jellyfish floating through a field of suspended diamond dust. Each particle catches and refracts light differently, creating a mesmerizing rainbow spectrum. Shot in ultra-high resolution with cutting-edge microscopy techniques, revealing both the delicate translucent tissues of the jellyfish and the geometric perfection of each suspended crystal" // Random exploration example
-                }
-            ]
-        }
-
-        You must generate 20 prompts.
-        """
-        
-        // Call LLM
-        let promptResult = await LLMService.shared.complete(
-            userPrompt: prompt,
-            systemPrompt: "You are generating creative photo prompts that build upon successful prompts and user interests. Focus on creating prompts that will result in visually stunning still images with strong composition, lighting, and attention to detail. Be imaginative while maintaining high production value and visual appeal. Pay special attention to photographic elements like composition rules, lighting, depth of field, and color harmony.",
-            responseType: PromptGenerationResponse.self,
-            schema: PromptGenerationSchema.schema
-        )
-
-        switch promptResult {
-        case let .success((response, rawContent)):
-            var allPrompts = response.prompts
-            
-            // Start processing initial prompts immediately
-            let processingTask = Task {
-                do {
-                    try await generateVideosFromPrompts(allPrompts)
-                } catch {
-                    print("❌ Error processing initial prompts: \(error.localizedDescription)")
-                }
-            }
-            
-            // Request more prompts if needed
-            if allPrompts.count < 20 {
-                print("⚠️ Only received \(allPrompts.count) prompts, requesting \(20 - allPrompts.count) more in background")
-                
-                // Create conversation messages
-                let messages: [LLMMessage] = [
-                    LLMMessage(
-                        role: .system,
-                        content: "You are generating creative photo prompts that build upon successful prompts and user interests. Focus on creating prompts that will result in visually stunning still images with strong composition, lighting, and attention to detail. Be imaginative while maintaining high production value and visual appeal. Pay special attention to photographic elements like composition rules, lighting, depth of field, and color harmony."
-                    ),
-                    LLMMessage(
-                        role: .user,
-                        content: prompt // Original prompt with all context
-                    ),
-                    LLMMessage(
-                        role: .assistant,
-                        content: rawContent // Use exact content from LLM
-                    ),
-                    LLMMessage(
-                        role: .user,
-                        content: "Please generate \(20 - allPrompts.count) more prompts following the same guidelines and distribution as before. Make sure these new prompts are different from the ones above."
-                    )
-                ]
-                
-                print("\n📝 Message Chain for Additional Prompts:")
-                print("=== System Message ===")
-                print(messages[0].content)
-                print("\n=== Initial User Message ===")
-                print(messages[1].content)
-                print("\n=== Assistant Response ===")
-                print(messages[2].content)
-                print("\n=== Follow-up User Message ===")
-                print(messages[3].content)
-                print("\n===================\n")
-                
-                let additionalResult = await LLMService.shared.complete(
-                    messages: messages,
-                    responseType: PromptGenerationResponse.self,
-                    schema: PromptGenerationSchema.schema
-                )
-                
-                switch additionalResult {
-                case let .success((additionalResponse, _)):
-                    print("✅ Generated \(additionalResponse.prompts.count) additional prompts")
-                    // Process additional prompts
-                    do {
-                        try await generateVideosFromPrompts(additionalResponse.prompts)
-                        allPrompts.append(contentsOf: additionalResponse.prompts)
-                    } catch {
-                        print("❌ Error processing additional prompts: \(error.localizedDescription)")
+        do {
+            // Create task group for parallel generation
+            try await withThrowingTaskGroup(of: [PromptGeneration].self) { group in
+                // Add mutation task if needed
+                if distribution.mutationCount > 0 {
+                    group.addTask {
+                        print("🧬 Starting mutation prompt generation...")
+                        let prompts = try await self.generateMutationPrompts(
+                            count: distribution.mutationCount,
+                            likedVideos: likedVideos,
+                            profile: profile
+                        )
+                        print("✅ Generated \(prompts.count) mutation prompts")
+                        return prompts
                     }
-                case .failure(let error):
-                    print("❌ Error generating additional prompts: \(error.description)")
+                }
+                
+                // Add crossover task if needed
+                if distribution.crossoverCount > 0 {
+                    group.addTask {
+                        print("🔄 Starting crossover prompt generation...")
+                        let prompts = try await self.generateCrossoverPrompts(
+                            count: distribution.crossoverCount,
+                            likedVideos: likedVideos,
+                            profile: profile
+                        )
+                        print("✅ Generated \(prompts.count) crossover prompts")
+                        return prompts
+                    }
+                }
+                
+                // Add profile-based task if needed
+                if distribution.profileBasedCount > 0 {
+                    group.addTask {
+                        print("👤 Starting profile-based prompt generation...")
+                        let prompts = try await self.generateProfileBasedPrompts(
+                            count: distribution.profileBasedCount,
+                            profile: profile
+                        )
+                        print("✅ Generated \(prompts.count) profile-based prompts")
+                        return prompts
+                    }
+                }
+                
+                // Add random exploration task if needed
+                if distribution.explorationCount > 0 {
+                    group.addTask {
+                        print("🎲 Starting random prompt generation...")
+                        let prompts = try await self.generateRandomPrompts(
+                            count: distribution.explorationCount
+                        )
+                        print("✅ Generated \(prompts.count) random prompts")
+                        return prompts
+                    }
+                }
+                
+                // Process prompts as they complete
+                for try await prompts in group {
+                    // Start processing these prompts immediately
+                    Task {
+                        do {
+                            try await generateVideosFromPrompts(prompts)
+                        } catch {
+                            print("❌ Error processing prompts: \(error.localizedDescription)")
+                        }
+                    }
+                    
+                    // Add to our collection
+                    allPrompts.append(contentsOf: prompts)
                 }
             }
             
-            // Wait for initial prompts to finish processing
-            await processingTask.value
+            // Check if we got enough prompts
+            let expectedTotal = distribution.mutationCount + distribution.crossoverCount + 
+                              distribution.profileBasedCount + distribution.explorationCount
+            
+            if allPrompts.count < expectedTotal {
+                print("⚠️ Only received \(allPrompts.count) prompts, expected \(expectedTotal)")
+                
+                // Calculate how many more we need of each type
+                let remainingMutations = distribution.mutationCount - allPrompts.filter { $0.parentId != nil }.count
+                let remainingCrossovers = distribution.crossoverCount - allPrompts.filter { $0.parentIds?.count == 2 }.count
+                let remainingProfileBased = distribution.profileBasedCount - allPrompts.filter { $0.parentId == nil && $0.parentIds == nil }.count
+                let remainingRandom = distribution.explorationCount - (allPrompts.count - (allPrompts.filter { $0.parentId != nil || $0.parentIds != nil }.count))
+                
+                // Try to generate the remaining prompts
+                if remainingMutations > 0 {
+                    print("🔄 Retrying mutation prompts for \(remainingMutations) prompts")
+                    let additional = try await generateMutationPrompts(
+                        count: remainingMutations,
+                        likedVideos: likedVideos,
+                        profile: profile
+                    )
+                    try await generateVideosFromPrompts(additional)
+                    allPrompts.append(contentsOf: additional)
+                }
+                
+                if remainingCrossovers > 0 {
+                    print("🔄 Retrying crossover prompts for \(remainingCrossovers) prompts")
+                    let additional = try await generateCrossoverPrompts(
+                        count: remainingCrossovers,
+                        likedVideos: likedVideos,
+                        profile: profile
+                    )
+                    try await generateVideosFromPrompts(additional)
+                    allPrompts.append(contentsOf: additional)
+                }
+                
+                if remainingProfileBased > 0 {
+                    print("🔄 Retrying profile-based prompts for \(remainingProfileBased) prompts")
+                    let additional = try await generateProfileBasedPrompts(
+                        count: remainingProfileBased,
+                        profile: profile
+                    )
+                    try await generateVideosFromPrompts(additional)
+                    allPrompts.append(contentsOf: additional)
+                }
+                
+                if remainingRandom > 0 {
+                    print("🔄 Retrying random prompts for \(remainingRandom) prompts")
+                    let additional = try await generateRandomPrompts(count: remainingRandom)
+                    try await generateVideosFromPrompts(additional)
+                    allPrompts.append(contentsOf: additional)
+                }
+            }
             
             print("✅ Generated \(allPrompts.count) total prompts")
-            return .success(PromptGenerationResponse(prompts: allPrompts), rawContent: rawContent)
-        case .failure(let error):
-            return .failure(error)
+            return .success(PromptGenerationResponse(prompts: allPrompts), rawContent: "")
+            
+        } catch {
+            print("❌ Error during prompt generation: \(error.localizedDescription)")
+            return .failure(.systemError(error))
         }
     }
 
