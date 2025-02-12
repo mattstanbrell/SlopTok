@@ -188,40 +188,96 @@ actor PromptGenerationService {
 
     /// Generates videos from an array of prompts in parallel
     private func generateVideosFromPrompts(_ prompts: [PromptGeneration]) async throws {
-        // For testing: randomly select 5 prompts
-        let testPrompts = prompts.shuffled().prefix(5)
-        print("🧪 Testing with 5 random prompts out of \(prompts.count)")
-        print("🧪 Selected prompts:")
-        for (index, prompt) in testPrompts.enumerated() {
-            print("  \(index + 1). \(prompt.prompt.prefix(50))...")
-        }
+        // Shuffle all prompts
+        let shuffledPrompts = prompts.shuffled()
+        print("🎬 Starting video generation for \(shuffledPrompts.count) prompts")
         
         // Create a task group for parallel processing
         var completedVideoIds: [String] = []
+        var failedPrompts: [(prompt: PromptGeneration, error: Error)] = []
+        
+        // Semaphore to limit concurrent tasks to avoid overwhelming the system
+        let maxConcurrentTasks = 5
+        let semaphore = DispatchSemaphore(value: maxConcurrentTasks)
         
         try await withThrowingTaskGroup(of: ProcessingResult?.self) { group in
             // Start all tasks
-            for (index, prompt) in testPrompts.enumerated() {
-                group.addTask {
-                    print("🎯 Starting task \(index + 1)")
-                    do {
-                        // 1. Generate image
-                        let imageData = try await self.generateImage(from: prompt.prompt)
-                        print("✅ Task \(index + 1): Generated image")
-                        
-                        // 2. Convert to video
-                        let videoURL = try await self.convertImageToVideo(imageData)
-                        print("✅ Task \(index + 1): Converted to video")
-                        
-                        // 3. Upload video and get video ID
-                        let videoId = try await self.uploadVideo(at: videoURL, prompt: prompt)
-                        print("✅ Task \(index + 1): Uploaded video \(videoId)")
-                        
-                        return ProcessingResult(videoId: videoId, prompt: prompt)
-                    } catch {
-                        print("❌ Task \(index + 1) failed: \(error.localizedDescription)")
-                        return nil
+            for (index, prompt) in shuffledPrompts.enumerated() {
+                // Wait for a slot to become available
+                await withCheckedContinuation { continuation in
+                    DispatchQueue.global().async {
+                        semaphore.wait()
+                        continuation.resume()
                     }
+                }
+                
+                group.addTask {
+                    defer {
+                        semaphore.signal() // Release the slot when done
+                    }
+                    
+                    print("🎯 Starting task \(index + 1)/\(shuffledPrompts.count)")
+                    
+                    // Retry logic for the entire pipeline
+                    let maxRetries = 2
+                    var lastError: Error?
+                    
+                    for attempt in 0...maxRetries {
+                        do {
+                            if attempt > 0 {
+                                print("🔄 Retry attempt \(attempt) for task \(index + 1)")
+                            }
+                            
+                            // 1. Generate image
+                            let imageData = try await self.generateImage(from: prompt.prompt)
+                            print("✅ Task \(index + 1): Generated image")
+                            
+                            // Create a unique directory for this task's temporary files
+                            let taskTempDir = FileManager.default.temporaryDirectory
+                                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+                            try FileManager.default.createDirectory(at: taskTempDir, 
+                                                                  withIntermediateDirectories: true)
+                            
+                            // 2. Convert to video
+                            let videoURL = try await self.convertImageToVideo(
+                                imageData,
+                                tempDirectory: taskTempDir
+                            )
+                            print("✅ Task \(index + 1): Converted to video")
+                            
+                            // Verify the video file exists and is accessible
+                            guard FileManager.default.fileExists(atPath: videoURL.path) else {
+                                throw NSError(
+                                    domain: "PromptGenerationService",
+                                    code: -1,
+                                    userInfo: [NSLocalizedDescriptionKey: "Video file not found after conversion"]
+                                )
+                            }
+                            
+                            // 3. Upload video and get video ID
+                            let videoId = try await self.uploadVideo(at: videoURL, prompt: prompt)
+                            print("✅ Task \(index + 1): Uploaded video \(videoId)")
+                            
+                            // Clean up temporary directory
+                            try? FileManager.default.removeItem(at: taskTempDir)
+                            
+                            return ProcessingResult(videoId: videoId, prompt: prompt)
+                        } catch {
+                            lastError = error
+                            print("❌ Task \(index + 1) attempt \(attempt) failed: \(error.localizedDescription)")
+                            
+                            if attempt == maxRetries {
+                                await MainActor.run {
+                                    failedPrompts.append((prompt: prompt, error: error))
+                                }
+                                return nil
+                            }
+                            
+                            // Add a small delay before retrying
+                            try? await Task.sleep(nanoseconds: UInt64(1_000_000_000 * Double(attempt + 1)))
+                        }
+                    }
+                    return nil
                 }
             }
             
@@ -231,22 +287,13 @@ actor PromptGenerationService {
                     print("✨ Completed video: \(result.videoId)")
                     completedVideoIds.append(result.videoId)
                     
-                    // Add video to feed immediately
                     await MainActor.run {
-                        print("📱 Adding video to feed: \(result.videoId)")
-                        VideoService.shared.appendVideo(result.videoId)
-                    }
-                    
-                    /* TODO: Restore batching logic after testing
-                    if completedVideoIds.count <= 5 {
-                        // Add first 5 videos individually as they come in
-                        await MainActor.run {
+                        if completedVideoIds.count <= 5 {
+                            // Add first 5 videos individually as they come in
                             print("📱 Adding video to feed (first 5): \(result.videoId)")
                             VideoService.shared.appendVideo(result.videoId)
-                        }
-                    } else if completedVideoIds.count % 5 == 0 {
-                        // After first 5, add in batches of 5
-                        await MainActor.run {
+                        } else if completedVideoIds.count % 5 == 0 {
+                            // After first 5, add in batches of 5
                             let startIndex = completedVideoIds.count - 5
                             let batch = Array(completedVideoIds[startIndex..<completedVideoIds.count])
                             print("📱 Adding batch of \(batch.count) videos to feed")
@@ -255,16 +302,14 @@ actor PromptGenerationService {
                             }
                         }
                     }
-                    */
                 }
             }
             
-            /* TODO: Restore remaining videos logic after testing
             // Add any remaining videos (after first 5 and complete batches)
-            if completedVideoIds.count > 5 {
-                let remainingCount = (completedVideoIds.count - 5) % 5
-                if remainingCount > 0 {
-                    await MainActor.run {
+            await MainActor.run {
+                if completedVideoIds.count > 5 {
+                    let remainingCount = (completedVideoIds.count - 5) % 5
+                    if remainingCount > 0 {
                         let startIndex = completedVideoIds.count - remainingCount
                         let batch = Array(completedVideoIds[startIndex..<completedVideoIds.count])
                         print("📱 Adding final batch of \(batch.count) videos to feed")
@@ -273,13 +318,36 @@ actor PromptGenerationService {
                         }
                     }
                 }
+                
+                // Log completion statistics
+                print("🎉 Video generation completed:")
+                print("  ✅ Successfully completed: \(completedVideoIds.count) videos")
+                print("  ❌ Failed: \(failedPrompts.count) prompts")
+                
+                if !failedPrompts.isEmpty {
+                    print("\nFailed prompts and their errors:")
+                    for (index, failedPrompt) in failedPrompts.enumerated() {
+                        print("\n\(index + 1). Prompt: \(failedPrompt.prompt.prompt.prefix(50))...")
+                        print("   Error: \(failedPrompt.error.localizedDescription)")
+                    }
+                }
+                
+                for (index, videoId) in completedVideoIds.enumerated() {
+                    print("  \(index + 1). \(videoId)")
+                }
             }
-            */
         }
         
-        print("🎉 Finished processing. Successfully completed \(completedVideoIds.count) videos:")
-        for (index, videoId) in completedVideoIds.enumerated() {
-            print("  \(index + 1). \(videoId)")
+        // If no videos were successfully generated, throw an error
+        if completedVideoIds.isEmpty {
+            throw NSError(
+                domain: "PromptGenerationService",
+                code: -1,
+                userInfo: [
+                    NSLocalizedDescriptionKey: "Failed to generate any videos from \(prompts.count) prompts",
+                    "failedPromptsCount": failedPrompts.count
+                ]
+            )
         }
     }
 
@@ -309,26 +377,43 @@ actor PromptGenerationService {
     }
 
     /// Converts an image to a 3-second video
-    private func convertImageToVideo(_ imageData: Data) async throws -> URL {
+    private func convertImageToVideo(_ imageData: Data, tempDirectory: URL) async throws -> URL {
         print("🎬 Converting image to video")
         
-        let tempImageURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        let tempImageURL = tempDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
         try imageData.write(to: tempImageURL)
         
         guard let image = UIImage(contentsOfFile: tempImageURL.path) else {
             throw NSError(domain: "PromptGenerationService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create UIImage from data"])
         }
         
-        // Use our new converter
+        // Use the converter with the standard parameters
         let videoURL = try await ImageToVideoConverter.convertImageToVideo(
             image: image,
             duration: 3.0,
             size: CGSize(width: 1080, height: 1920) // 9:16 aspect ratio for vertical video
         )
         
+        // Clean up the temporary image file
         try? FileManager.default.removeItem(at: tempImageURL)
         
-        return videoURL
+        // Move the video to our task's temp directory for better management
+        let finalVideoURL = tempDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
+        try FileManager.default.moveItem(at: videoURL, to: finalVideoURL)
+        
+        // Verify the video was created successfully
+        guard FileManager.default.fileExists(atPath: finalVideoURL.path),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: finalVideoURL.path),
+              let fileSize = attributes[.size] as? Int64,
+              fileSize > 0 else {
+            throw NSError(
+                domain: "PromptGenerationService",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Video file is missing or empty after conversion"]
+            )
+        }
+        
+        return finalVideoURL
     }
 
     /// Uploads a video to Firebase Storage with metadata
