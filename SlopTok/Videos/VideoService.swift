@@ -8,6 +8,10 @@ class VideoService: ObservableObject {
     @Published private(set) var videos: [String] = []
     @Published private(set) var isLoading = false
     @Published private(set) var error: Error?
+    
+    // Track which videos are seed vs generated
+    private var seedVideos: Set<String> = []
+    private var generatedVideos: Set<String> = []
 
     private init() {}
     
@@ -19,7 +23,7 @@ class VideoService: ObservableObject {
             // Load seed videos first
             let seedRef = storage.reference().child("videos/seed")
             let seedResult = try await seedRef.listAll()
-            let seedVideos = seedResult.items.map { item -> String in
+            let seedVideoIds = seedResult.items.map { item -> String in
                 let fullPath = item.name
                 return String(fullPath.dropLast(4)) // Remove .mp4
             }.sorted() // Sort seed videos alphabetically
@@ -27,14 +31,18 @@ class VideoService: ObservableObject {
             // Load generated videos
             let generatedRef = storage.reference().child("videos/generated")
             let generatedResult = try await generatedRef.listAll()
-            let generatedVideos = generatedResult.items.map { item -> String in
+            let generatedVideoIds = generatedResult.items.map { item -> String in
                 let fullPath = item.name
                 return String(fullPath.dropLast(4)) // Remove .mp4
             }.sorted(by: { $1.compare($0) == .orderedAscending }) // Sort generated videos newest first
             
+            // Update our tracking sets
+            seedVideos = Set(seedVideoIds)
+            generatedVideos = Set(generatedVideoIds)
+            
             // Combine with seed videos first, then generated videos
-            videos = seedVideos + generatedVideos
-            print("📹 VideoService - Loaded \(videos.count) videos (\(seedVideos.count) seed, \(generatedVideos.count) generated)")
+            videos = seedVideoIds + generatedVideoIds
+            print("📹 VideoService - Loaded \(videos.count) videos (\(seedVideoIds.count) seed, \(generatedVideoIds.count) generated)")
         } catch {
             self.error = error
             print("❌ VideoService - Error loading videos: \(error)")
@@ -47,36 +55,31 @@ class VideoService: ObservableObject {
     func appendVideo(_ videoId: String) {
         print("📹 VideoService - Appending video after seed videos")
         // Find the last seed video index
-        let seedRef = storage.reference().child("videos/seed")
-        if let lastSeedIndex = videos.lastIndex(where: { videoId in
-            seedRef.child("\(videoId).mp4") != nil
-        }) {
+        if let lastSeedIndex = videos.lastIndex(where: { seedVideos.contains($0) }) {
             // Insert after the last seed video
             videos.insert(videoId, at: lastSeedIndex + 1)
         } else {
             // If no seed videos found, append to beginning
             videos.insert(videoId, at: 0)
         }
-        
-        // Reload the complete video list to ensure everything is in sync
-        Task {
-            await loadVideos()
-        }
+        // Mark as generated video
+        generatedVideos.insert(videoId)
     }
     
     /// Adds a video to the beginning of the feed
     func insertVideoAtBeginning(_ videoId: String) {
         print("📹 VideoService - Inserting video at beginning: \(videoId)")
         videos.insert(videoId, at: 0)
+        // Mark as generated video
+        generatedVideos.insert(videoId)
     }
     
     /// Gets the storage path for a video
     func getVideoPath(_ videoId: String) -> String {
-        // Check if it's a seed video
-        if videos.contains(videoId) && storage.reference().child("videos/seed/\(videoId).mp4") != nil {
+        // Use our tracking sets to determine the correct path
+        if seedVideos.contains(videoId) {
             return "videos/seed/\(videoId).mp4"
         }
-        // Otherwise assume it's a generated video
         return "videos/generated/\(videoId).mp4"
     }
 } 

@@ -188,21 +188,24 @@ actor PromptGenerationService {
 
     /// Generates videos from an array of prompts in parallel
     private func generateVideosFromPrompts(_ prompts: [PromptGeneration]) async throws {
-        // Shuffle all prompts
-        let shuffledPrompts = prompts.shuffled()
-        print("🎬 Starting video generation for \(shuffledPrompts.count) prompts")
+        // Take only 5 random prompts to process
+        let selectedPrompts = Array(prompts.shuffled().prefix(5))
+        print("🎬 Starting video generation for \(selectedPrompts.count) prompts out of \(prompts.count) total prompts")
         
         // Create a task group for parallel processing
         var completedVideoIds: [String] = []
         var failedPrompts: [(prompt: PromptGeneration, error: Error)] = []
         
         // Semaphore to limit concurrent tasks to avoid overwhelming the system
-        let maxConcurrentTasks = 5
+        let maxConcurrentTasks = 3 // Reduced from 5 to lower system load
         let semaphore = DispatchSemaphore(value: maxConcurrentTasks)
         
         try await withThrowingTaskGroup(of: ProcessingResult?.self) { group in
             // Start all tasks
-            for (index, prompt) in shuffledPrompts.enumerated() {
+            for (index, prompt) in selectedPrompts.enumerated() {
+                // Check if the task group has been cancelled
+                try Task.checkCancellation()
+                
                 // Wait for a slot to become available
                 await withCheckedContinuation { continuation in
                     DispatchQueue.global().async {
@@ -211,12 +214,23 @@ actor PromptGenerationService {
                     }
                 }
                 
-                group.addTask {
+                group.addTask { [weak self] in
+                    guard let self = self else { return nil }
+                    
                     defer {
                         semaphore.signal() // Release the slot when done
                     }
                     
-                    print("🎯 Starting task \(index + 1)/\(shuffledPrompts.count)")
+                    // Create a unique directory for this task's temporary files
+                    let taskTempDir = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+                    
+                    defer {
+                        // Clean up temporary directory when task is done
+                        try? FileManager.default.removeItem(at: taskTempDir)
+                    }
+                    
+                    print("🎯 Starting task \(index + 1)/\(selectedPrompts.count)")
                     
                     // Retry logic for the entire pipeline
                     let maxRetries = 2
@@ -224,25 +238,28 @@ actor PromptGenerationService {
                     
                     for attempt in 0...maxRetries {
                         do {
+                            // Check for cancellation at the start of each attempt
+                            try Task.checkCancellation()
+                            
                             if attempt > 0 {
                                 print("🔄 Retry attempt \(attempt) for task \(index + 1)")
                             }
                             
-                            // 1. Generate image
-                            let imageData = try await self.generateImage(from: prompt.prompt)
-                            print("✅ Task \(index + 1): Generated image")
-                            
-                            // Create a unique directory for this task's temporary files
-                            let taskTempDir = FileManager.default.temporaryDirectory
-                                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+                            // Create the temp directory if it doesn't exist
                             try FileManager.default.createDirectory(at: taskTempDir, 
                                                                   withIntermediateDirectories: true)
+                            
+                            // 1. Generate image
+                            let imageData = try await self.generateImage(from: prompt.prompt)
+                            try Task.checkCancellation()
+                            print("✅ Task \(index + 1): Generated image")
                             
                             // 2. Convert to video
                             let videoURL = try await self.convertImageToVideo(
                                 imageData,
                                 tempDirectory: taskTempDir
                             )
+                            try Task.checkCancellation()
                             print("✅ Task \(index + 1): Converted to video")
                             
                             // Verify the video file exists and is accessible
@@ -256,12 +273,13 @@ actor PromptGenerationService {
                             
                             // 3. Upload video and get video ID
                             let videoId = try await self.uploadVideo(at: videoURL, prompt: prompt)
+                            try Task.checkCancellation()
                             print("✅ Task \(index + 1): Uploaded video \(videoId)")
                             
-                            // Clean up temporary directory
-                            try? FileManager.default.removeItem(at: taskTempDir)
-                            
                             return ProcessingResult(videoId: videoId, prompt: prompt)
+                        } catch is CancellationError {
+                            print("❌ Task \(index + 1) was cancelled")
+                            return nil
                         } catch {
                             lastError = error
                             print("❌ Task \(index + 1) attempt \(attempt) failed: \(error.localizedDescription)")
@@ -273,7 +291,8 @@ actor PromptGenerationService {
                                 return nil
                             }
                             
-                            // Add a small delay before retrying
+                            // Check for cancellation before retry delay
+                            try? Task.checkCancellation()
                             try? await Task.sleep(nanoseconds: UInt64(1_000_000_000 * Double(attempt + 1)))
                         }
                     }

@@ -7,6 +7,7 @@ class VideoViewService {
     static let shared = VideoViewService()
     private let db = Firestore.firestore()
     private let storage = Storage.storage()
+    private let videoService = VideoService.shared
     
     private init() {}
     
@@ -27,7 +28,8 @@ class VideoViewService {
             // If first watch, get the video prompt from Storage metadata
             var promptData: [String: Any] = [:]
             if isFirstWatch {
-                let videoRef = storage.reference().child("videos/seed/\(videoId).mp4")
+                let videoPath = videoService.getVideoPath(videoId)
+                let videoRef = storage.reference().child(videoPath)
                 let metadata = try await videoRef.getMetadata()
                 if let prompt = metadata.customMetadata?["prompt"] {
                     promptData["prompt"] = prompt
