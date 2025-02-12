@@ -71,29 +71,13 @@ struct MainFeedView: View {
         // Update player cache position tracking
         PlayerCache.shared.updatePosition(current: videoService.videos[index])
         
-        var needsPreload = false
-        for i in indicesToPreload {
-            if !PlayerCache.shared.hasPlayer(for: videoService.videos[i]) {
-                needsPreload = true
-                break
-            }
-        }
-        
-        if !needsPreload { return }
-        
+        // Preload videos that aren't already in the player cache
         for i in indicesToPreload {
             let resource = videoService.videos[i]
             // Skip if already preloaded
             if PlayerCache.shared.hasPlayer(for: resource) { continue }
             
-            // Check if we have the video file cached
-            let localURL = VideoFileCache.shared.localFileURL(for: resource)
-            if FileManager.default.fileExists(atPath: localURL.path) {
-                createAndCachePlayer(for: resource, url: localURL)
-                continue
-            }
-            
-            // If not in file cache, get the URL and download
+            // Get the URL and download/create player
             VideoURLCache.shared.getVideoURL(for: resource) { url in
                 if let url = url {
                     VideoFileCache.shared.getLocalVideoURL(for: resource, remoteURL: url) { localURL in
@@ -127,7 +111,7 @@ struct MainFeedView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView(.vertical, showsIndicators: false) {
-                        VStack(spacing: 0) {
+                        LazyVStack(spacing: 0) {
                             ForEach(Array(videoService.videos.enumerated()), id: \.element) { (index, video) in
                                 ZStack {
                                     VideoPlayerView(
@@ -254,11 +238,12 @@ struct MainFeedView: View {
             if scrollPosition == nil {
                 print("📱 MainFeedView - Setting initial scroll position to 0")
                 scrollPosition = 0
+                // Only preload once we have a valid scroll position
+                preloadNextVideos(from: 0)
             }
             
             print("📱 MainFeedView - Final videos array: \(videoService.videos)")
             print("📱 MainFeedView - Final scroll position: \(String(describing: scrollPosition))")
-            preloadNextVideos(from: scrollPosition ?? 0)
         }
         .onChange(of: initialVideoId) { newVideoId in
             if let videoId = newVideoId,

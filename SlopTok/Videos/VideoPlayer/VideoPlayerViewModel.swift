@@ -48,13 +48,6 @@ class VideoPlayerViewModel: ObservableObject {
                 return
             }
             
-            // If no preloaded player, check file cache
-            let localURL = VideoFileCache.shared.localFileURL(for: videoResource)
-            if FileManager.default.fileExists(atPath: localURL.path) {
-                createPlayer(with: localURL)
-                return
-            }
-            
             // Last resort: download the video
             VideoURLCache.shared.getVideoURL(for: videoResource) { [weak self] remoteURL in
                 guard let self = self, let remoteURL = remoteURL else { return }
@@ -63,6 +56,7 @@ class VideoPlayerViewModel: ObservableObject {
                     guard let localURL = localURL else { return }
                     DispatchQueue.main.async {
                         self.createPlayer(with: localURL)
+                        PlayerCache.shared.setPlayer(self.player!, for: self.videoResource)
                     }
                 }
             }

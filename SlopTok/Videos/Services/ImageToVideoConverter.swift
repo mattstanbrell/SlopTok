@@ -20,8 +20,8 @@ class ImageToVideoConverter {
             throw NSError(domain: "ImageToVideoConverter", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create MP4Exporter"])
         }
         
-        // Add the image frame for the specified duration at 60fps
-        let frameCount = Int(duration * 60) // 60fps for smooth playback
+        // Add the image frame at 2fps - minimum rate for compatibility while avoiding waste
+        let frameCount = Int(duration * 2) // 2fps is enough for a static image
         let frameDuration = duration / Double(frameCount)
         
         for i in 0..<frameCount {
