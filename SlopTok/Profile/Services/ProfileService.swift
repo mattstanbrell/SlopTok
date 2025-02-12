@@ -68,7 +68,7 @@ class ProfileService: ObservableObject {
                 
                 // Generate initial prompts
                 if let profile = self.currentProfile {
-                    let promptResult = await PromptGenerationService.shared.generateInitialPrompts(
+                    let promptResult = await PromptGenerationService.shared.generatePrompts(
                         likedVideos: likedVideos,
                         profile: profile
                     )

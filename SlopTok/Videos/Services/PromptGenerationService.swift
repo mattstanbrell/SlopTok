@@ -56,12 +56,12 @@ actor PromptGenerationService {
         }
     }
     
-    /// Generates the initial set of prompts after seed videos
+    /// Generates prompts based on seed videos
     /// - Parameters:
     ///   - likedVideos: Array of prompts from seed videos the user liked
     ///   - profile: The user's current profile
     /// - Returns: Array of generated prompts or error
-    func generateInitialPrompts(
+    func generatePrompts(
         likedVideos: [(id: String, prompt: String)],
         profile: UserProfile
     ) async -> LLMResponse<PromptGenerationResponse> {
@@ -190,9 +190,7 @@ actor PromptGenerationService {
 
     /// Generates videos from an array of prompts in parallel
     private func generateVideosFromPrompts(_ prompts: [PromptGeneration]) async throws {
-        // Take only 5 random prompts to process
-        let selectedPrompts = Array(prompts.shuffled().prefix(5))
-        print("🎬 Starting video generation for \(selectedPrompts.count) prompts out of \(prompts.count) total prompts")
+        print("🎬 Starting video generation for \(prompts.count) prompts")
         
         // Create a task group for parallel processing
         var completedVideoIds: [String] = []
@@ -204,7 +202,7 @@ actor PromptGenerationService {
         
         try await withThrowingTaskGroup(of: ProcessingResult?.self) { group in
             // Start all tasks
-            for (index, prompt) in selectedPrompts.enumerated() {
+            for (index, prompt) in prompts.enumerated() {
                 // Check if the task group has been cancelled
                 try Task.checkCancellation()
                 
@@ -232,7 +230,7 @@ actor PromptGenerationService {
                         try? FileManager.default.removeItem(at: taskTempDir)
                     }
                     
-                    print("🎯 Starting task \(index + 1)/\(selectedPrompts.count)")
+                    print("🎯 Starting task \(index + 1)/\(prompts.count)")
                     
                     // Retry logic for the entire pipeline
                     let maxRetries = 2
