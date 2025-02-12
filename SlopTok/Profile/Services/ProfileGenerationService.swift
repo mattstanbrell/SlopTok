@@ -58,13 +58,50 @@ actor ProfileGenerationService {
         Risqué content (eg cleavage, tight clothing, etc) is ok to include if the user's interests align with it, but avoid describing actual nudity.
         """
         
-        // Call LLM
-        return await LLMService.shared.complete(
-            userPrompt: prompt,
-            systemPrompt: "You are analyzing image generation prompts to understand a user's visual interests and content preferences. Focus on the subjects, styles, and themes they engage with in visual content. You MUST output valid JSON matching the required schema.",
-            responseType: ProfileGenerationResponse.self,
-            schema: ProfileGenerationSchema.schema
-        )
+        // Call LLM with retry logic
+        let maxRetries = 2
+        var lastError: LLMError?
+        
+        for attempt in 0...maxRetries {
+            do {
+                if attempt > 0 {
+                    print("🔄 Retry attempt \(attempt) for initial profile generation")
+                    // Add exponential backoff delay
+                    try await Task.sleep(nanoseconds: UInt64(1_000_000_000 * Double(attempt)))
+                }
+                
+                let result = await LLMService.shared.complete(
+                    userPrompt: prompt,
+                    systemPrompt: "You are analyzing image generation prompts to understand a user's visual interests and content preferences. Focus on the subjects, styles, and themes they engage with in visual content. You MUST output valid JSON matching the required schema.",
+                    responseType: ProfileGenerationResponse.self,
+                    schema: ProfileGenerationSchema.schema
+                )
+                
+                switch result {
+                case .success:
+                    return result
+                case .failure(let error):
+                    lastError = error
+                    // Only retry on network/system errors
+                    if case .systemError = error {
+                        if attempt == maxRetries {
+                            print("❌ All retry attempts failed for initial profile generation")
+                            return result
+                        }
+                        continue
+                    }
+                    return result
+                }
+            } catch {
+                lastError = .systemError(error)
+                if attempt == maxRetries {
+                    print("❌ All retry attempts failed for initial profile generation")
+                    return .failure(.systemError(error))
+                }
+            }
+        }
+        
+        return .failure(lastError ?? .systemError(NSError(domain: "ProfileGenerationService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown error during profile generation"])))
     }
     
     /// Response for semantic interest matching
@@ -72,6 +109,7 @@ actor ProfileGenerationService {
         struct Match: Codable {
             let oldTopic: String
             let newTopic: String
+            let canonicalTopic: String
         }
         let matches: [Match]
     }
@@ -93,15 +131,24 @@ actor ProfileGenerationService {
                         "newTopic": {
                             "type": "string",
                             "description": "Semantically matching topic from the new profile"
+                        },
+                        "canonicalTopic": {
+                            "type": "string",
+                            "description": "The best, most clear and complete name for this topic"
                         }
                     },
-                    "required": ["oldTopic", "newTopic"]
+                    "required": ["oldTopic", "newTopic", "canonicalTopic"]
                 }
             }
         },
         "required": ["matches"]
     }
     """
+    
+    /// Response for description generation
+    private struct DescriptionResponse: Codable {
+        let description: String
+    }
     
     /// Generates updated profile based on recent interactions
     /// - Parameter likedVideos: Array of prompts from images the user liked since last update
@@ -154,21 +201,54 @@ actor ProfileGenerationService {
         Risqué content (eg cleavage, tight clothing, etc) is ok to include if the user's interests align with it, but avoid describing actual nudity.
         """
         
-        // Call LLM
-        let result = await LLMService.shared.complete(
-            userPrompt: prompt,
-            systemPrompt: "You are analyzing image generation prompts to understand a user's visual interests and content preferences. Focus on the subjects, styles, and themes they engage with in visual content. You MUST output valid JSON matching the required schema.",
-            responseType: ProfileGenerationResponse.self,
-            schema: ProfileGenerationSchema.schema
-        )
+        // Call LLM with retry logic
+        let maxRetries = 2
+        var lastError: LLMError?
         
-        // If we have a current profile, merge the interests
-        if case let .success((response, _)) = result,
-           let currentProfile = await ProfileService.shared.currentProfile {
-            return await mergeProfiles(newResponse: response, currentProfile: currentProfile)
+        for attempt in 0...maxRetries {
+            do {
+                if attempt > 0 {
+                    print("🔄 Retry attempt \(attempt) for profile update")
+                    // Add exponential backoff delay
+                    try await Task.sleep(nanoseconds: UInt64(1_000_000_000 * Double(attempt)))
+                }
+                
+                let result = await LLMService.shared.complete(
+                    userPrompt: prompt,
+                    systemPrompt: "You are analyzing image generation prompts to understand a user's visual interests and content preferences. Focus on the subjects, styles, and themes they engage with in visual content. You MUST output valid JSON matching the required schema.",
+                    responseType: ProfileGenerationResponse.self,
+                    schema: ProfileGenerationSchema.schema
+                )
+                
+                switch result {
+                case .success((let response, let rawContent)):
+                    // If we have a current profile, merge the interests
+                    if let currentProfile = await ProfileService.shared.currentProfile {
+                        return await mergeProfiles(newResponse: response, currentProfile: currentProfile)
+                    }
+                    return .success(response, rawContent: rawContent)
+                case .failure(let error):
+                    lastError = error
+                    // Only retry on network/system errors
+                    if case .systemError = error {
+                        if attempt == maxRetries {
+                            print("❌ All retry attempts failed for profile update")
+                            return result
+                        }
+                        continue
+                    }
+                    return result
+                }
+            } catch {
+                lastError = .systemError(error)
+                if attempt == maxRetries {
+                    print("❌ All retry attempts failed for profile update")
+                    return .failure(.systemError(error))
+                }
+            }
         }
         
-        return result
+        return .failure(lastError ?? .systemError(NSError(domain: "ProfileGenerationService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown error during profile update"])))
     }
     
     /// Merges new interests with existing profile, handling semantic matches and weight updates
@@ -182,9 +262,13 @@ actor ProfileGenerationService {
             if let matchIndex = unmatchedOldInterests.firstIndex(where: { $0.topic == newInterest.topic }) {
                 let oldInterest = unmatchedOldInterests[matchIndex]
                 
-                // Merge examples and increase weight
-                var mergedInterest = oldInterest
-                mergedInterest.examples = Array(Set(oldInterest.examples + newInterest.examples))
+                // Create new interest with merged data
+                var mergedInterest = Interest(
+                    topic: oldInterest.topic,  // Keep existing topic name for exact matches
+                    examples: Array(Set(oldInterest.examples + newInterest.examples))
+                )
+                
+                // Update weight and timestamp
                 mergedInterest.weight = min(1.0, oldInterest.weight + 0.1)
                 mergedInterest.lastUpdated = Date()
                 
@@ -210,6 +294,7 @@ actor ProfileGenerationService {
             Identify any semantically matching topics between these two lists of interests.
             Only match topics that mean the same thing but are written differently (e.g., "Mountain Biking" and "MTB").
             Do not match topics that are merely related or similar.
+            For each match, provide the best, most clear and complete name for the topic.
             
             Existing interests:
             \(oldInterestsFormatted)
@@ -222,12 +307,23 @@ actor ProfileGenerationService {
                 "matches": [
                     {
                         "oldTopic": "Mountain Biking",
-                        "newTopic": "MTB"
+                        "newTopic": "MTB",
+                        "canonicalTopic": "Mountain Biking"
+                    },
+                    {
+                        "oldTopic": "Portrait Photos",
+                        "newTopic": "Portrait Photography",
+                        "canonicalTopic": "Portrait Photography"
                     }
                 ]
             }
             
             If there are no semantic matches, return an empty matches array.
+            When choosing the canonical topic name:
+            - Use the most complete, clear, and professional version
+            - Avoid abbreviations unless they're more commonly used
+            - Keep consistent with existing naming patterns
+            - Ensure it's descriptive and unambiguous
             """
             
             let semanticResult = await LLMService.shared.complete(
@@ -245,9 +341,13 @@ actor ProfileGenerationService {
                         let oldInterest = unmatchedOldInterests[oldIndex]
                         let newInterest = unmatchedNewInterests[newIndex]
                         
-                        // Merge examples and increase weight
-                        var mergedInterest = oldInterest
-                        mergedInterest.examples = Array(Set(oldInterest.examples + newInterest.examples))
+                        // Create new interest with canonical topic name and merged data
+                        var mergedInterest = Interest(
+                            topic: match.canonicalTopic,  // Use canonical name
+                            examples: Array(Set(oldInterest.examples + newInterest.examples))
+                        )
+                        
+                        // Update weight and timestamp
                         mergedInterest.weight = min(1.0, oldInterest.weight + 0.1)
                         mergedInterest.lastUpdated = Date()
                         
@@ -262,11 +362,17 @@ actor ProfileGenerationService {
         // 3. Handle remaining unmatched interests
         
         // Decrease weight of unmatched old interests
-        for var oldInterest in unmatchedOldInterests {
-            oldInterest.weight = max(0.0, oldInterest.weight - 0.1)
-            oldInterest.lastUpdated = Date()
-            if oldInterest.weight > 0 {
-                mergedInterests.append(oldInterest)
+        for oldInterest in unmatchedOldInterests {
+            // Create new interest with decreased weight
+            var updatedInterest = Interest(
+                topic: oldInterest.topic,
+                examples: oldInterest.examples
+            )
+            updatedInterest.weight = max(0.0, oldInterest.weight - 0.1)
+            updatedInterest.lastUpdated = Date()
+            
+            if updatedInterest.weight > 0 {
+                mergedInterests.append(updatedInterest)
             }
         }
         
@@ -298,19 +404,36 @@ actor ProfileGenerationService {
         let descriptionResult = await LLMService.shared.complete(
             userPrompt: descriptionPrompt,
             systemPrompt: "You are writing a natural description of a user's visual preferences and interests, focusing on their strongest interests and how they've evolved.",
-            responseType: String.self,
+            responseType: DescriptionResponse.self,
             schema: """
             {
-                "type": "string",
-                "description": "Natural language description of the user's interests"
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "Natural language description of the user's interests"
+                    }
+                },
+                "required": ["description"],
+                "additionalProperties": false
             }
             """
         )
         
-        let updatedDescription = if case let .success((description, _)) = descriptionResult {
-            description
-        } else {
-            newResponse.description
+        let updatedDescription: String
+        switch descriptionResult {
+        case let .success((response, rawContent)):
+            print("✅ Generated merged description:")
+            print(rawContent)
+            updatedDescription = response.description
+        case let .failure(error):
+            print("❌ Failed to generate merged description: \(error.description)")
+            // If LLM fails, do a basic merge of the descriptions
+            updatedDescription = """
+                \(newResponse.description)
+                
+                This builds upon their previous interests: \(currentProfile.description)
+                """
         }
         
         // Create merged response
