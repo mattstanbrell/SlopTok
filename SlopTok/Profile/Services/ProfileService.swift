@@ -1,7 +1,6 @@
 import Foundation
 import FirebaseFirestore
 import FirebaseAuth
-import FirebaseVertexAI
 
 /// Service responsible for managing user profiles, including creation, updates, and storage
 @MainActor
@@ -238,70 +237,4 @@ class ProfileService: ObservableObject {
     }
 }
 
-class VertexAIService {
-    static let shared = VertexAIService()
-    private let vertex = VertexAI.vertexAI()
-    private let model: GenerativeModel
-    
-    private init() {
-        self.model = vertex.generativeModel(modelName: "gemini-2.0-flash")
-    }
-    
-    func analyzeText(_ prompt: String) async throws -> String {
-        let response = try await model.generateContent(prompt)
-        return response.text ?? "No analysis available"
-    }
-    
-    func analyzeImage(_ image: UIImage, prompt: String = "What's in this picture?") async throws -> String {
-        let response = try await model.generateContent(image, prompt)
-        return response.text ?? "No analysis available"
-    }
-    
-    func generateContent(_ textA: String, _ imageA: UIImage, _ textB: String, _ imageB: UIImage, _ prompt: String) async throws -> String {
-        let response = try await model.generateContent(textA, imageA, textB, imageB, prompt)
-        return response.text ?? "No analysis available"
-    }
-    
-    func generateContentForFive(images: [(label: String, image: UIImage)], prompt: String) async throws -> String {
-        guard !images.isEmpty else {
-            return "No images to analyze"
-        }
-        
-        if images.count == 1 {
-            return try await model.generateContent(
-                "Image 1", images[0].image,
-                "Describe Image 1"
-            ).text ?? "No analysis available"
-        } else if images.count == 2 {
-            return try await model.generateContent(
-                "Image 1", images[0].image,
-                "Image 2", images[1].image,
-                "Describe Image 1 and Image 2"
-            ).text ?? "No analysis available"
-        } else if images.count == 3 {
-            return try await model.generateContent(
-                "Image 1", images[0].image,
-                "Image 2", images[1].image,
-                "Image 3", images[2].image,
-                "Describe Image 1, Image 2, and Image 3"
-            ).text ?? "No analysis available"
-        } else if images.count == 4 {
-            return try await model.generateContent(
-                "Image 1", images[0].image,
-                "Image 2", images[1].image,
-                "Image 3", images[2].image,
-                "Image 4", images[3].image,
-                "Describe Image 1, Image 2, Image 3, and Image 4"
-            ).text ?? "No analysis available"
-        } else {
-            return try await model.generateContent(
-                "Image 1", images[0].image,
-                "Image 2", images[1].image,
-                "Image 3", images[2].image,
-                "Image 4", images[3].image,
-                "Image 5", images[4].image,
-                "Describe Image 1, Image 2, Image 3, Image 4, and Image 5"
-            ).text ?? "No analysis available"
-        }
-    }
-} 
+
