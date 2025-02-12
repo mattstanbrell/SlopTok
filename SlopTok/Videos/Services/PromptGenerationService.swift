@@ -167,29 +167,11 @@ actor PromptGenerationService {
         case .success(let response):
             print("✅ Generated \(response.prompts.count) initial prompts")
             
-            // Process only the first prompt
-            if let firstPrompt = response.prompts.first {
-                do {
-                    print("🎨 Processing first prompt: \(firstPrompt.prompt)")
-                    
-                    // 1. Generate image
-                    let imageData = try await generateImage(from: firstPrompt.prompt)
-                    print("✅ Generated image from prompt")
-                    
-                    // 2. Convert to video
-                    let videoURL = try await convertImageToVideo(imageData)
-                    print("✅ Converted image to video")
-                    
-                    // 3. Upload video with metadata
-                    try await uploadVideo(at: videoURL, prompt: firstPrompt)
-                    print("✅ Uploaded video to Firebase")
-                    
-                    // Clean up temporary video file
-                    try? FileManager.default.removeItem(at: videoURL)
-                    print("🧹 Cleaned up temporary files")
-                } catch {
-                    print("❌ Error processing prompt: \(error.localizedDescription)")
-                }
+            // Process all prompts in parallel
+            do {
+                try await generateVideosFromPrompts(response.prompts)
+            } catch {
+                print("❌ Error processing prompts: \(error.localizedDescription)")
             }
             
             return .success(response)
@@ -198,34 +180,114 @@ actor PromptGenerationService {
         }
     }
 
-    /// Generates videos from an array of prompts
+    /// Result of processing a single prompt
+    private struct ProcessingResult {
+        let videoId: String
+        let prompt: PromptGeneration
+    }
+
+    /// Generates videos from an array of prompts in parallel
     private func generateVideosFromPrompts(_ prompts: [PromptGeneration]) async throws {
-        for prompt in prompts {
-            do {
-                // 1. Generate image
-                let imageData = try await generateImage(from: prompt.prompt)
-                
-                // 2. Convert to video
-                let videoURL = try await convertImageToVideo(imageData)
-                
-                // 3. Upload video with metadata
-                try await uploadVideo(at: videoURL, prompt: prompt)
-                
-                // Clean up temporary video file
-                try? FileManager.default.removeItem(at: videoURL)
-            } catch {
-                print("❌ Error processing prompt: \(error.localizedDescription)")
-                // Continue with next prompt even if one fails
-                continue
+        // For testing: randomly select 5 prompts
+        let testPrompts = prompts.shuffled().prefix(5)
+        print("🧪 Testing with 5 random prompts out of \(prompts.count)")
+        print("🧪 Selected prompts:")
+        for (index, prompt) in testPrompts.enumerated() {
+            print("  \(index + 1). \(prompt.prompt.prefix(50))...")
+        }
+        
+        // Create a task group for parallel processing
+        var completedVideoIds: [String] = []
+        
+        try await withThrowingTaskGroup(of: ProcessingResult?.self) { group in
+            // Start all tasks
+            for (index, prompt) in testPrompts.enumerated() {
+                group.addTask {
+                    print("🎯 Starting task \(index + 1)")
+                    do {
+                        // 1. Generate image
+                        let imageData = try await self.generateImage(from: prompt.prompt)
+                        print("✅ Task \(index + 1): Generated image")
+                        
+                        // 2. Convert to video
+                        let videoURL = try await self.convertImageToVideo(imageData)
+                        print("✅ Task \(index + 1): Converted to video")
+                        
+                        // 3. Upload video and get video ID
+                        let videoId = try await self.uploadVideo(at: videoURL, prompt: prompt)
+                        print("✅ Task \(index + 1): Uploaded video \(videoId)")
+                        
+                        return ProcessingResult(videoId: videoId, prompt: prompt)
+                    } catch {
+                        print("❌ Task \(index + 1) failed: \(error.localizedDescription)")
+                        return nil
+                    }
+                }
             }
+            
+            // Collect results as they complete
+            for try await result in group {
+                if let result = result {
+                    print("✨ Completed video: \(result.videoId)")
+                    completedVideoIds.append(result.videoId)
+                    
+                    // Add video to feed immediately
+                    await MainActor.run {
+                        print("📱 Adding video to feed: \(result.videoId)")
+                        VideoService.shared.appendVideo(result.videoId)
+                    }
+                    
+                    /* TODO: Restore batching logic after testing
+                    if completedVideoIds.count <= 5 {
+                        // Add first 5 videos individually as they come in
+                        await MainActor.run {
+                            print("📱 Adding video to feed (first 5): \(result.videoId)")
+                            VideoService.shared.appendVideo(result.videoId)
+                        }
+                    } else if completedVideoIds.count % 5 == 0 {
+                        // After first 5, add in batches of 5
+                        await MainActor.run {
+                            let startIndex = completedVideoIds.count - 5
+                            let batch = Array(completedVideoIds[startIndex..<completedVideoIds.count])
+                            print("📱 Adding batch of \(batch.count) videos to feed")
+                            for videoId in batch {
+                                VideoService.shared.appendVideo(videoId)
+                            }
+                        }
+                    }
+                    */
+                }
+            }
+            
+            /* TODO: Restore remaining videos logic after testing
+            // Add any remaining videos (after first 5 and complete batches)
+            if completedVideoIds.count > 5 {
+                let remainingCount = (completedVideoIds.count - 5) % 5
+                if remainingCount > 0 {
+                    await MainActor.run {
+                        let startIndex = completedVideoIds.count - remainingCount
+                        let batch = Array(completedVideoIds[startIndex..<completedVideoIds.count])
+                        print("📱 Adding final batch of \(batch.count) videos to feed")
+                        for videoId in batch {
+                            VideoService.shared.appendVideo(videoId)
+                        }
+                    }
+                }
+            }
+            */
+        }
+        
+        print("🎉 Finished processing. Successfully completed \(completedVideoIds.count) videos:")
+        for (index, videoId) in completedVideoIds.enumerated() {
+            print("  \(index + 1). \(videoId)")
         }
     }
 
-    /// Generates an image from a prompt using our worker
+    /// Generates an image from a prompt using Flux Schnell
     private func generateImage(from prompt: String) async throws -> Data {
         print("🖼️ Generating image for prompt: \(prompt)")
         
-        let request = URLRequest(url: URL(string: "https://sloptok-images.mattstanbrell.workers.dev/")!)
+        let request = URLRequest(url: URL(string: "https://sloptok-schnell.mattstanbrell.workers.dev/")!)
         var imageRequest = request
         imageRequest.httpMethod = "POST"
         imageRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -233,13 +295,16 @@ actor PromptGenerationService {
         let requestBody = ["prompt": prompt]
         imageRequest.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
         
-        let (data, _) = try await URLSession.shared.data(for: imageRequest)
-        let imageResponse = try JSONDecoder().decode(ImageResponse.self, from: data)
+        let (data, response) = try await URLSession.shared.data(for: imageRequest)
+        let imageResponse = try JSONDecoder().decode(FluxSchnellResponse.self, from: data)
         
-        guard let imageData = Data(base64Encoded: imageResponse.imageData) else {
-            throw NSError(domain: "PromptGenerationService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid image data"])
+        guard imageResponse.success,
+              let imageUrl = URL(string: imageResponse.imageUrl) else {
+            throw NSError(domain: "PromptGenerationService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid image response"])
         }
         
+        // Download the image data from the URL
+        let (imageData, _) = try await URLSession.shared.data(from: imageUrl)
         return imageData
     }
 
@@ -267,21 +332,20 @@ actor PromptGenerationService {
     }
 
     /// Uploads a video to Firebase Storage with metadata
-    private func uploadVideo(at videoURL: URL, prompt: PromptGeneration) async throws {
+    /// Returns the generated video ID
+    private func uploadVideo(at videoURL: URL, prompt: PromptGeneration) async throws -> String {
         print("📤 Starting video upload process")
         print("📤 Video file exists: \(FileManager.default.fileExists(atPath: videoURL.path))")
         
         if let fileSize = try? FileManager.default.attributesOfItem(atPath: videoURL.path)[.size] as? Int64 {
             print("📤 Video file size: \(fileSize) bytes")
-        } else {
-            print("❌ Could not get file size")
         }
         
         // Generate a shorter video ID: timestamp (6 chars) + random (4 chars)
         let timestamp = String(format: "%06x", Int(Date().timeIntervalSince1970) % 0xFFFFFF)
         let randomChars = "abcdefghijklmnopqrstuvwxyz0123456789"
         let random = String((0..<4).map { _ in randomChars.randomElement()! })
-        let videoId = "\(timestamp)\(random)" // Results in a 10-character ID like "f5e21cabcd"
+        let videoId = "\(timestamp)\(random)"
         
         let storage = Storage.storage()
         let videoRef = storage.reference().child("videos/generated/\(videoId).mp4")
@@ -294,33 +358,34 @@ actor PromptGenerationService {
             "prompt": prompt.prompt,
             "parentIds": prompt.parentIds?.joined(separator: ",") ?? ""
         ]
+        print("📤 Created metadata with prompt and parentIds")
         
         do {
-            print("📤 Starting Firebase upload...")
-            _ = try await videoRef.putFile(from: videoURL, metadata: metadata)
-            print("📤 Upload completed")
+            // Upload the file and wait for completion
+            _ = try await videoRef.putFileAsync(from: videoURL, metadata: metadata)
+            print("📤 Upload completed successfully")
             
-            // Add a small delay to allow Firebase to process the upload
-            try await Task.sleep(nanoseconds: 1_000_000_000)  // 1 second delay
+            // Verify the upload
+            let uploadedMetadata = try await videoRef.getMetadata()
+            print("📤 Verified upload with metadata:")
+            print("  - Size: \(uploadedMetadata.size) bytes")
+            print("  - Content Type: \(uploadedMetadata.contentType ?? "none")")
+            print("  - Custom Metadata: \(uploadedMetadata.customMetadata ?? [:])")
             
-            // Verify the upload by trying to get the download URL
-            let downloadURL = try await videoRef.downloadURL()
-            print("📤 Successfully got download URL: \(downloadURL)")
+            // Clean up the video file after successful upload
+            try? FileManager.default.removeItem(at: videoURL)
+            print("🧹 Cleaned up video file")
             
-            // Add to end of feed
-            await MainActor.run {
-                VideoService.shared.appendVideo(videoId)
-            }
-            print("📤 Added video to end of feed: \(videoId)")
+            return videoId
         } catch {
-            print("❌ Upload failed with error: \(error)")
+            print("❌ Upload failed with error: \(error.localizedDescription)")
             throw error
         }
     }
 }
 
-/// Response from the image generation worker
-private struct ImageResponse: Codable {
+/// Response from the Flux Schnell worker
+private struct FluxSchnellResponse: Codable {
     let success: Bool
-    let imageData: String
+    let imageUrl: String
 } 

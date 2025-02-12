@@ -16,16 +16,13 @@ class VideoService: ObservableObject {
         error = nil
         
         do {
-            var allVideos: [String] = []
-            
-            // Load seed videos
+            // Load seed videos first
             let seedRef = storage.reference().child("videos/seed")
             let seedResult = try await seedRef.listAll()
             let seedVideos = seedResult.items.map { item -> String in
                 let fullPath = item.name
                 return String(fullPath.dropLast(4)) // Remove .mp4
-            }
-            allVideos.append(contentsOf: seedVideos)
+            }.sorted() // Sort seed videos alphabetically
             
             // Load generated videos
             let generatedRef = storage.reference().child("videos/generated")
@@ -33,11 +30,10 @@ class VideoService: ObservableObject {
             let generatedVideos = generatedResult.items.map { item -> String in
                 let fullPath = item.name
                 return String(fullPath.dropLast(4)) // Remove .mp4
-            }
-            allVideos.append(contentsOf: generatedVideos)
+            }.sorted(by: { $1.compare($0) == .orderedAscending }) // Sort generated videos newest first
             
-            // Sort videos by name for consistent ordering
-            videos = allVideos.sorted()
+            // Combine with seed videos first, then generated videos
+            videos = seedVideos + generatedVideos
             print("📹 VideoService - Loaded \(videos.count) videos (\(seedVideos.count) seed, \(generatedVideos.count) generated)")
         } catch {
             self.error = error
@@ -49,8 +45,23 @@ class VideoService: ObservableObject {
     
     /// Adds a video to the end of the feed
     func appendVideo(_ videoId: String) {
-        print("📹 VideoService - Appending video to end: \(videoId)")
-        videos.append(videoId)
+        print("📹 VideoService - Appending video after seed videos")
+        // Find the last seed video index
+        let seedRef = storage.reference().child("videos/seed")
+        if let lastSeedIndex = videos.lastIndex(where: { videoId in
+            seedRef.child("\(videoId).mp4") != nil
+        }) {
+            // Insert after the last seed video
+            videos.insert(videoId, at: lastSeedIndex + 1)
+        } else {
+            // If no seed videos found, append to beginning
+            videos.insert(videoId, at: 0)
+        }
+        
+        // Reload the complete video list to ensure everything is in sync
+        Task {
+            await loadVideos()
+        }
     }
     
     /// Adds a video to the beginning of the feed
