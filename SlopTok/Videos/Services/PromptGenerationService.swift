@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import FirebaseStorage
+import SwiftUI
 
 /// Service responsible for generating new video prompts using LLM
 actor PromptGenerationService {
@@ -250,37 +251,40 @@ actor PromptGenerationService {
         print("🎬 Converting image to video")
         
         let tempImageURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
-        let tempVideoURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
-        
         try imageData.write(to: tempImageURL)
         
-        let asset = AVAsset(url: tempImageURL)
-        let composition = AVMutableComposition()
-        let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
+        guard let image = UIImage(contentsOfFile: tempImageURL.path) else {
+            throw NSError(domain: "PromptGenerationService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create UIImage from data"])
+        }
         
-        let duration = CMTime(seconds: 3, preferredTimescale: 600)
-        try videoTrack?.insertTimeRange(CMTimeRange(start: .zero, duration: duration),
-                                      of: asset.tracks(withMediaType: .video)[0],
-                                      at: .zero)
-        
-        let exportSession = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality)
-        exportSession?.outputURL = tempVideoURL
-        exportSession?.outputFileType = .mp4
-        
-        await exportSession?.export()
+        // Use our new converter
+        let videoURL = try await ImageToVideoConverter.convertImageToVideo(
+            image: image,
+            duration: 3.0,
+            size: CGSize(width: 1080, height: 1920) // 9:16 aspect ratio for vertical video
+        )
         
         try? FileManager.default.removeItem(at: tempImageURL)
         
-        return tempVideoURL
+        return videoURL
     }
 
     /// Uploads a video to Firebase Storage with metadata
     private func uploadVideo(at videoURL: URL, prompt: PromptGeneration) async throws {
-        print("📤 Uploading video to Firebase")
+        print("📤 Starting video upload process")
+        print("📤 Video file exists: \(FileManager.default.fileExists(atPath: videoURL.path))")
+        
+        if let fileSize = try? FileManager.default.attributesOfItem(atPath: videoURL.path)[.size] as? Int64 {
+            print("📤 Video file size: \(fileSize) bytes")
+        } else {
+            print("❌ Could not get file size")
+        }
         
         let storage = Storage.storage()
         let videoId = UUID().uuidString
         let videoRef = storage.reference().child("videos/generated/\(videoId).mp4")
+        
+        print("📤 Created storage reference: videos/generated/\(videoId).mp4")
         
         let metadata = StorageMetadata()
         metadata.contentType = "video/mp4"
@@ -289,11 +293,84 @@ actor PromptGenerationService {
             "parentIds": prompt.parentIds?.joined(separator: ",") ?? ""
         ]
         
-        _ = try await videoRef.putFile(from: videoURL, metadata: metadata)
+        do {
+            print("📤 Starting Firebase upload...")
+            _ = try await videoRef.putFile(from: videoURL, metadata: metadata)
+            print("📤 Upload completed")
+            
+            // Add a small delay to allow Firebase to process the upload
+            try await Task.sleep(nanoseconds: 1_000_000_000)  // 1 second delay
+            
+            // Verify the upload by trying to get the download URL
+            let downloadURL = try await videoRef.downloadURL()
+            print("📤 Successfully got download URL: \(downloadURL)")
+            
+            // Add to beginning of feed
+            await MainActor.run {
+                VideoService.shared.insertVideoAtBeginning(videoId)
+            }
+            print("📤 Added video to beginning of feed: \(videoId)")
+        } catch {
+            print("❌ Upload failed with error: \(error)")
+            throw error
+        }
+    }
+    
+    /// Generates a test video for development purposes
+    public func generateTestVideo() async {
+        print("🧪 Generating test video")
+        var videoURL: URL?
         
-        // Add to feed after the seed videos
-        await MainActor.run {
-            VideoService.shared.appendVideo(videoId)
+        do {
+            // Create a simple blue test image
+            let size = CGSize(width: 1080, height: 1920)
+            let renderer = UIGraphicsImageRenderer(size: size)
+            let image = renderer.image { context in
+                // Fill background with blue
+                UIColor.systemBlue.setFill()
+                context.fill(CGRect(origin: .zero, size: size))
+                
+                // Add some text for identification
+                let text = "Test Video"
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .foregroundColor: UIColor.white,
+                    .font: UIFont.systemFont(ofSize: 48, weight: .bold)
+                ]
+                let textSize = text.size(withAttributes: attributes)
+                let textRect = CGRect(
+                    x: (size.width - textSize.width) / 2,
+                    y: (size.height - textSize.height) / 2,
+                    width: textSize.width,
+                    height: textSize.height
+                )
+                text.draw(in: textRect, withAttributes: attributes)
+            }
+            
+            // Convert to video
+            videoURL = try await ImageToVideoConverter.convertImageToVideo(
+                image: image,
+                duration: 3.0,
+                size: size
+            )
+            print("✅ Converted test image to video")
+            
+            guard let videoURL = videoURL else {
+                throw NSError(domain: "PromptGenerationService", code: -1, userInfo: [NSLocalizedDescriptionKey: "No video URL generated"])
+            }
+            
+            // Upload video with metadata
+            let prompt = PromptGeneration(prompt: "Test blue video", parentIds: nil)
+            try await uploadVideo(at: videoURL, prompt: prompt)
+            print("✅ Uploaded test video")
+            
+        } catch {
+            print("❌ Error generating test video: \(error)")
+        }
+        
+        // Clean up temporary video file only after everything is done
+        if let videoURL = videoURL {
+            try? FileManager.default.removeItem(at: videoURL)
+            print("🧹 Cleaned up temporary files")
         }
     }
 }

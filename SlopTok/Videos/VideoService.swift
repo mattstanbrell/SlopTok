@@ -16,21 +16,29 @@ class VideoService: ObservableObject {
         error = nil
         
         do {
-            // Get reference to the seed folder
+            var allVideos: [String] = []
+            
+            // Load seed videos
             let seedRef = storage.reference().child("videos/seed")
-            
-            // List all items in the seed folder
-            let result = try await seedRef.listAll()
-            
-            // Extract video IDs from the items (removing .mp4 extension)
-            let videoIds = result.items.map { item -> String in
+            let seedResult = try await seedRef.listAll()
+            let seedVideos = seedResult.items.map { item -> String in
                 let fullPath = item.name
                 return String(fullPath.dropLast(4)) // Remove .mp4
             }
+            allVideos.append(contentsOf: seedVideos)
+            
+            // Load generated videos
+            let generatedRef = storage.reference().child("videos/generated")
+            let generatedResult = try await generatedRef.listAll()
+            let generatedVideos = generatedResult.items.map { item -> String in
+                let fullPath = item.name
+                return String(fullPath.dropLast(4)) // Remove .mp4
+            }
+            allVideos.append(contentsOf: generatedVideos)
             
             // Sort videos by name for consistent ordering
-            videos = videoIds.sorted()
-            print("📹 VideoService - Loaded \(videos.count) videos")
+            videos = allVideos.sorted()
+            print("📹 VideoService - Loaded \(videos.count) videos (\(seedVideos.count) seed, \(generatedVideos.count) generated)")
         } catch {
             self.error = error
             print("❌ VideoService - Error loading videos: \(error)")
@@ -41,7 +49,23 @@ class VideoService: ObservableObject {
     
     /// Adds a video to the end of the feed
     func appendVideo(_ videoId: String) {
-        print("📹 VideoService - Appending video: \(videoId)")
+        print("📹 VideoService - Appending video to end: \(videoId)")
         videos.append(videoId)
+    }
+    
+    /// Adds a video to the beginning of the feed
+    func insertVideoAtBeginning(_ videoId: String) {
+        print("📹 VideoService - Inserting video at beginning: \(videoId)")
+        videos.insert(videoId, at: 0)
+    }
+    
+    /// Gets the storage path for a video
+    func getVideoPath(_ videoId: String) -> String {
+        // Check if it's a seed video
+        if videos.contains(videoId) && storage.reference().child("videos/seed/\(videoId).mp4") != nil {
+            return "videos/seed/\(videoId).mp4"
+        }
+        // Otherwise assume it's a generated video
+        return "videos/generated/\(videoId).mp4"
     }
 } 

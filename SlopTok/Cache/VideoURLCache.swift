@@ -38,19 +38,31 @@ class VideoURLCache {
         }
         
         let storage = Storage.storage()
-        let videoRef = storage.reference(withPath: "videos/seed/\(videoResource).mp4")
-        videoRef.downloadURL { [weak self] url, error in
-            if let error = error {
-                print("❌ VideoURLCache - Error getting download URL: \(error)")
-                completion(nil)
-                return
-            }
+        
+        // Try seed videos first
+        let seedRef = storage.reference(withPath: "videos/seed/\(videoResource).mp4")
+        seedRef.downloadURL { [weak self] url, error in
             if let url = url {
                 let cachedURL = CachedVideoURL(url: url, date: now)
                 self?.cache.setObject(cachedURL, forKey: key)
                 completion(url)
             } else {
-                completion(nil)
+                // If not found in seed, try generated videos
+                let generatedRef = storage.reference(withPath: "videos/generated/\(videoResource).mp4")
+                generatedRef.downloadURL { [weak self] url, error in
+                    if let error = error {
+                        print("❌ VideoURLCache - Error getting download URL: \(error)")
+                        completion(nil)
+                        return
+                    }
+                    if let url = url {
+                        let cachedURL = CachedVideoURL(url: url, date: now)
+                        self?.cache.setObject(cachedURL, forKey: key)
+                        completion(url)
+                    } else {
+                        completion(nil)
+                    }
+                }
             }
         }
     }
