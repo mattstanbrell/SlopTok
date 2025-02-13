@@ -1,64 +1,80 @@
 import Foundation
+import FirebaseVertexAI
+import UIKit
 
 /// Service responsible for generating user profiles using LLM
 actor ProfileGenerationService {
     /// Shared instance
     static let shared = ProfileGenerationService()
     
-    private init() {}
+    private let vertex: VertexAI
+    private let model: GenerativeModel
+    
+    private init() {
+        self.vertex = VertexAI.vertexAI()
+        self.model = vertex.generativeModel(
+            modelName: "gemini-2.0-flash",
+            generationConfig: GenerationConfig(
+                responseMIMEType: "application/json",
+                responseSchema: ProfileGenerationGeminiSchema.schema
+            )
+        )
+    }
     
     /// Generates initial profile from seed video interactions
     /// - Parameter likedVideos: Array of prompts from videos the user liked from the seed set
     /// - Returns: Generated profile or error
     func generateInitialProfile(likedVideos: [(id: String, prompt: String)]) async -> LLMResponse<ProfileGenerationResponse> {
         // Format video prompts for readability
-        let formattedVideos = likedVideos
-            .map { "- \($0.prompt)" }
-            .joined(separator: "\n")
+        let formattedPrompts = likedVideos.enumerated().map { index, video in
+            "Image \(index + 1) Prompt: \(video.prompt)"
+        }.joined(separator: "\n")
+        
+        // Load thumbnails for liked videos
+        var thumbnailImages: [(label: String, image: UIImage?)] = []
+        
+        // Get thumbnails for all videos
+        for (index, video) in likedVideos.enumerated() {
+            if let image = await VideoService.shared.getUIImageThumbnail(for: video.id) {
+                thumbnailImages.append(("Image \(index + 1)", image))
+            }
+        }
+        
+        // Filter out any nil images and prepare for analysis
+        let validImages = thumbnailImages.compactMap { label, image -> (label: String, image: UIImage)? in
+            if let image = image {
+                return (label: label, image: image)
+            }
+            return nil
+        }
+        
+        // Build the parts array with prompts and images
+        var parts: [PartsRepresentable] = []
+        for (index, image) in validImages.enumerated() {
+            parts.append("Image \(index + 1) Prompt:" as PartsRepresentable)
+            parts.append(likedVideos[index].prompt as PartsRepresentable)
+            parts.append(image.image as PartsRepresentable)
+        }
         
         // Build the prompt
         let prompt = """
-        Analyze these AI image generation prompts from images the user liked. Each prompt describes the visual content of an image they enjoyed:
-        \(formattedVideos)
+        Analyze these AI-generated images and their generation prompts. Each pair shows an image the user liked and the prompt used to create it.
 
-        Based on the visual themes and subjects in these liked images, suggest possible interests and patterns, while acknowledging the limited data.
+        Based on the visual content and themes in these liked images, suggest possible interests and patterns, while acknowledging the limited data.
         For each potential interest:
-        - Suggest a specific topic that might match the visual content they've engaged with
-        - List at least 3 examples seen in the prompts, such as:
+        - Suggest a specific topic that matches the visual content they've engaged with
+        - List at least 3 examples seen in the images and prompts, such as:
           * Specific subjects shown
           * Visual styles and techniques
           * Props and objects featured
           * Settings and environments
-
-        Example response:
-        {
-          "interests": [
-            {
-              "topic": "Nature Photography",
-              "examples": [
-                "macro flower details",
-                "soft natural lighting",
-                "botanical compositions"
-              ]
-            },
-            {
-              "topic": "Architectural Photography",
-              "examples": [
-                "geometric patterns",
-                "dramatic building angles",
-                "minimalist structures"
-              ]
-            }
-          ],
-          "description": "Based on this limited initial set of interactions, the user appears to show interest in detailed nature photography, particularly images that capture intricate botanical details. They've also engaged with architectural content, suggesting a possible appreciation for geometric forms and structural compositions. As more data becomes available, these preferences may evolve or reveal different patterns."
-        }
 
         You MUST identify at least one interest and provide at least 3 examples for each interest.
         Make the description focus on their visual preferences and what kind of content they've engaged with so far, while acknowledging the preliminary nature of these observations.
         Risqué content (eg cleavage, tight clothing, etc) is ok to include if the user's interests align with it, but avoid describing actual nudity.
         """
         
-        // Call LLM with retry logic
+        // Call Gemini with retry logic
         let maxRetries = 2
         var lastError: LLMError?
         
@@ -70,27 +86,14 @@ actor ProfileGenerationService {
                     try await Task.sleep(nanoseconds: UInt64(1_000_000_000 * Double(attempt)))
                 }
                 
-                let result = await LLMService.shared.complete(
-                    userPrompt: prompt,
-                    systemPrompt: "You are analyzing image generation prompts to understand a user's visual interests and content preferences. Focus on the subjects, styles, and themes they engage with in visual content. You MUST output valid JSON matching the required schema.",
-                    responseType: ProfileGenerationResponse.self,
-                    schema: ProfileGenerationSchema.schema
-                )
+                let response = try await model.generateContent(parts + [prompt as PartsRepresentable])
                 
-                switch result {
-                case .success:
-                    return result
-                case .failure(let error):
-                    lastError = error
-                    // Only retry on network/system errors
-                    if case .systemError = error {
-                        if attempt == maxRetries {
-                            print("❌ All retry attempts failed for initial profile generation")
-                            return result
-                        }
-                        continue
-                    }
-                    return result
+                if let text = response.text,
+                   let data = text.data(using: .utf8),
+                   let decoded = try? JSONDecoder().decode(ProfileGenerationResponse.self, from: data) {
+                    return .success(decoded, rawContent: text)
+                } else {
+                    return .failure(.apiError("Invalid response format"))
                 }
             } catch {
                 lastError = .systemError(error)

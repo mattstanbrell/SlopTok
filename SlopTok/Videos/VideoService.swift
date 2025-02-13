@@ -2,6 +2,7 @@ import Foundation
 import FirebaseStorage
 import FirebaseFirestore
 import FirebaseAuth
+import UIKit
 
 @MainActor
 class VideoService: ObservableObject {
@@ -108,5 +109,17 @@ class VideoService: ObservableObject {
             return "videos/seed/\(videoId).mp4"
         }
         return "videos/generated/\(videoId).mp4"
+    }
+    
+    /// Gets a UIImage thumbnail for a video
+    /// - Parameter videoId: The ID of the video
+    /// - Returns: UIImage if thumbnail could be loaded, nil otherwise
+    func getUIImageThumbnail(for videoId: String) async -> UIImage? {
+        await withCheckedContinuation { continuation in
+            ThumbnailGenerator.generateThumbnail(for: videoId) { _ in
+                let uiImage = ThumbnailCache.shared.getCachedUIImage(for: videoId)
+                continuation.resume(returning: uiImage)
+            }
+        }
     }
 } 
