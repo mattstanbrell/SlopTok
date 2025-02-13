@@ -61,13 +61,36 @@ actor ProfileGenerationService {
         Analyze these AI-generated images and their generation prompts. Each pair shows an image the user liked and the prompt used to create it.
 
         Based on the visual content and themes in these liked images, suggest possible interests and patterns, while acknowledging the limited data.
-        For each potential interest:
+        For each interest:
         - Suggest a specific topic that matches the visual content they've engaged with
         - List at least 3 examples seen in the images and prompts, such as:
           * Specific subjects shown
           * Visual styles and techniques
           * Props and objects featured
           * Settings and environments
+
+        Example response:
+        {
+          "interests": [
+            {
+              "topic": "Nature Photography",
+              "examples": [
+                "macro flower details",
+                "soft natural lighting",
+                "botanical compositions"
+              ]
+            },
+            {
+              "topic": "Architectural Photography",
+              "examples": [
+                "geometric patterns",
+                "dramatic building angles",
+                "minimalist structures"
+              ]
+            }
+          ],
+          "description": "Based on this limited initial set of interactions, the user appears to show interest in detailed nature photography, particularly images that capture intricate botanical details. They've also engaged with architectural content, suggesting a possible appreciation for geometric forms and structural compositions. As more data becomes available, these preferences may evolve or reveal different patterns."
+        }
 
         You MUST identify at least one interest and provide at least 3 examples for each interest.
         Make the description focus on their visual preferences and what kind of content they've engaged with so far, while acknowledging the preliminary nature of these observations.
@@ -154,23 +177,48 @@ actor ProfileGenerationService {
     }
     
     /// Generates updated profile based on recent interactions
-    /// - Parameter likedVideos: Array of prompts from images the user liked since last update
+    /// - Parameter likedVideos: Array of prompts from videos the user liked since last update
     /// - Returns: Generated profile or error
     func generateUpdatedProfile(likedVideos: [(id: String, prompt: String)]) async -> LLMResponse<ProfileGenerationResponse> {
         // Format video prompts for readability
-        let formattedVideos = likedVideos
-            .map { "- \($0.prompt)" }
-            .joined(separator: "\n")
+        let formattedPrompts = likedVideos.enumerated().map { index, video in
+            "Image \(index + 1) Prompt: \(video.prompt)"
+        }.joined(separator: "\n")
+        
+        // Load thumbnails for liked videos
+        var thumbnailImages: [(label: String, image: UIImage?)] = []
+        
+        // Get thumbnails for all videos
+        for (index, video) in likedVideos.enumerated() {
+            if let image = await VideoService.shared.getUIImageThumbnail(for: video.id) {
+                thumbnailImages.append(("Image \(index + 1)", image))
+            }
+        }
+        
+        // Filter out any nil images and prepare for analysis
+        let validImages = thumbnailImages.compactMap { label, image -> (label: String, image: UIImage)? in
+            if let image = image {
+                return (label: label, image: image)
+            }
+            return nil
+        }
+        
+        // Build the parts array with prompts and images
+        var parts: [PartsRepresentable] = []
+        for (index, image) in validImages.enumerated() {
+            parts.append("Image \(index + 1) Prompt:" as PartsRepresentable)
+            parts.append(likedVideos[index].prompt as PartsRepresentable)
+            parts.append(image.image as PartsRepresentable)
+        }
         
         // Build the prompt
         let prompt = """
-        Analyze these AI image generation prompts from images the user liked. Each prompt describes the visual content of an image they enjoyed:
-        \(formattedVideos)
+        Analyze these AI-generated images and their generation prompts. Each pair shows an image the user liked and the prompt used to create it.
 
-        Based on the visual themes and subjects in these liked images, identify interests and patterns.
+        Based on the visual content and themes in these liked images, identify interests and patterns.
         For each interest:
         - Choose a specific, well-defined topic that matches the visual content they engage with
-        - List at least 3 examples seen in the prompts, such as:
+        - List at least 3 examples seen in the images and prompts, such as:
           * Specific subjects shown
           * Visual styles and techniques
           * Props and objects featured
@@ -180,23 +228,23 @@ actor ProfileGenerationService {
         {
           "interests": [
             {
-              "topic": "Nature Photography",
+              "topic": "Portrait Photography",
               "examples": [
-                "macro flower details",
-                "soft natural lighting",
-                "botanical compositions"
+                "dramatic side lighting",
+                "urban backdrops",
+                "candid expressions"
               ]
             },
             {
-              "topic": "Architectural Photography",
+              "topic": "Street Fashion",
               "examples": [
-                "geometric patterns",
-                "dramatic building angles",
-                "minimalist structures"
+                "high contrast aesthetics",
+                "urban streetwear styling",
+                "dynamic poses"
               ]
             }
           ],
-          "description": "Based on these interactions, the user shows a strong interest in detailed nature photography, particularly images that capture intricate botanical details. They've also engaged with architectural content, suggesting an appreciation for geometric forms and structural compositions."
+          "description": "The user shows a strong interest in portrait and fashion photography with an urban edge. Their preferences lean towards dramatic lighting and contemporary styling, particularly in city environments. The images they engage with often feature a blend of candid moments and styled compositions."
         }
 
         You MUST identify at least one interest and provide at least 3 examples for each interest.
@@ -204,7 +252,7 @@ actor ProfileGenerationService {
         Risqué content (eg cleavage, tight clothing, etc) is ok to include if the user's interests align with it, but avoid describing actual nudity.
         """
         
-        // Call LLM with retry logic
+        // Call Gemini with retry logic
         let maxRetries = 2
         var lastError: LLMError?
         
@@ -216,31 +264,18 @@ actor ProfileGenerationService {
                     try await Task.sleep(nanoseconds: UInt64(1_000_000_000 * Double(attempt)))
                 }
                 
-                let result = await LLMService.shared.complete(
-                    userPrompt: prompt,
-                    systemPrompt: "You are analyzing image generation prompts to understand a user's visual interests and content preferences. Focus on the subjects, styles, and themes they engage with in visual content. You MUST output valid JSON matching the required schema.",
-                    responseType: ProfileGenerationResponse.self,
-                    schema: ProfileGenerationSchema.schema
-                )
+                let response = try await model.generateContent(parts + [prompt as PartsRepresentable])
                 
-                switch result {
-                case .success((let response, let rawContent)):
+                if let text = response.text,
+                   let data = text.data(using: .utf8),
+                   let decoded = try? JSONDecoder().decode(ProfileGenerationResponse.self, from: data) {
                     // If we have a current profile, merge the interests
                     if let currentProfile = await ProfileService.shared.currentProfile {
-                        return await mergeProfiles(newResponse: response, currentProfile: currentProfile)
+                        return await mergeProfiles(newResponse: decoded, currentProfile: currentProfile)
                     }
-                    return .success(response, rawContent: rawContent)
-                case .failure(let error):
-                    lastError = error
-                    // Only retry on network/system errors
-                    if case .systemError = error {
-                        if attempt == maxRetries {
-                            print("❌ All retry attempts failed for profile update")
-                            return result
-                        }
-                        continue
-                    }
-                    return result
+                    return .success(decoded, rawContent: text)
+                } else {
+                    return .failure(.apiError("Invalid response format"))
                 }
             } catch {
                 lastError = .systemError(error)
