@@ -34,7 +34,7 @@ struct PromptGeneration: Codable {
 }
 
 /// Response from LLM for generating new image prompts
-struct PromptGenerationResponse: Codable {
+struct PromptGenerationOpenAIResponse: Codable {
     /// The array of generated prompts
     let prompts: [PromptGeneration]
 }

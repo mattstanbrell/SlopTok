@@ -46,16 +46,28 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				"Prompt Generation/PromptDistribution.swift",
 			);
 			target = 6E327EDA2D5131C600E5EE3C /* SlopTok */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
+		6E89D6B12D5E732B004ED153 /* Exceptions for "SlopTok" folder in "Copy Bundle Resources" phase from "SlopTok" target */ = {
+			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
+			buildPhase = 6E327ED92D5131C600E5EE3C /* Resources */;
+			membershipExceptions = (
+				"Prompt Generation/PromptDistribution.swift",
+			);
+		};
+/* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		6E327EDD2D5131C600E5EE3C /* SlopTok */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				6E327F5E2D5166AB00E5EE3C /* Exceptions for "SlopTok" folder in "SlopTok" target */,
+				6E89D6B12D5E732B004ED153 /* Exceptions for "SlopTok" folder in "Copy Bundle Resources" phase from "SlopTok" target */,
 			);
 			path = SlopTok;
 			sourceTree = "<group>";

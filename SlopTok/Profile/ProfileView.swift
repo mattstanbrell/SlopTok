@@ -313,9 +313,9 @@ struct ProfileView: View {
                     // Get thumbnails for all videos
                     for (index, video) in recentVideos.enumerated() {
                         await withCheckedContinuation { continuation in
-                            ThumbnailGenerator.generateThumbnail(for: video.id) { image in
+                            ThumbnailGenerator.getThumbnail(for: video.id) { image in
                                 if let _ = image {
-                                    let uiImage = ThumbnailCache.shared.getCachedUIImage(for: video.id)
+                                    let uiImage = ThumbnailCache.shared.getCachedUIImageThumbnail(for: video.id)
                                     thumbnailImages.append(("Image \(index + 1)", uiImage))
                                 }
                                 continuation.resume()

@@ -36,7 +36,7 @@ struct GridView<T: VideoModel, FullScreenView: View>: View {
                 ForEach(sortedVideos, id: \.id) { video in
                     VideoThumbnail(videoId: video.id, thumbnail: thumbnails[video.id])
                         .onAppear {
-                            generateThumbnail(for: video.id)
+                            getThumbnail(for: video.id)
                         }
                         .onTapGesture {
                             selectedVideoId = video.id
@@ -50,9 +50,9 @@ struct GridView<T: VideoModel, FullScreenView: View>: View {
         }
     }
 
-    private func generateThumbnail(for videoId: String) {
+    private func getThumbnail(for videoId: String) {
         if thumbnails[videoId] != nil { return }
-        ThumbnailGenerator.generateThumbnail(for: videoId) { image in
+        ThumbnailGenerator.getThumbnail(for: videoId) { image in
             if let image = image {
                 DispatchQueue.main.async {
                     thumbnails[videoId] = image

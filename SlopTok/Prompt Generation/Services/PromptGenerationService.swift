@@ -4,48 +4,6 @@ import FirebaseStorage
 import SwiftUI
 import FirebaseVertexAI
 
-/// Helper for exponential backoff retries
-private struct RetryHelper {
-    /// Maximum number of retries
-    static let maxRetries = 5
-    
-    /// Executes a task with exponential backoff retries
-    /// - Parameters:
-    ///   - operation: The async operation to retry
-    ///   - shouldRetry: Closure that determines if an error should trigger a retry
-    /// - Returns: The operation result
-    static func retry<T>(
-        operation: () async throws -> T,
-        shouldRetry: (Error) -> Bool = { _ in true }
-    ) async throws -> T {
-        var lastError: Error?
-        
-        for attempt in 0...maxRetries {
-            do {
-                if attempt > 0 {
-                    // Exponential backoff: 1s, 2s, 4s
-                    let delay = pow(2.0, Double(attempt - 1))
-                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                    print("🔄 Retry attempt \(attempt) after \(delay)s delay")
-                }
-                return try await operation()
-            } catch {
-                lastError = error
-                if !shouldRetry(error) || attempt == maxRetries {
-                    throw error
-                }
-                print("❌ Attempt \(attempt) failed: \(error.localizedDescription)")
-            }
-        }
-        
-        throw lastError ?? NSError(
-            domain: "RetryHelper",
-            code: -1,
-            userInfo: [NSLocalizedDescriptionKey: "Unknown error during retry"]
-        )
-    }
-}
-
 /// Service responsible for generating new video prompts using LLM
 actor PromptGenerationService {
     /// Shared instance
@@ -235,7 +193,7 @@ actor PromptGenerationService {
                             let prompts = mutatedPrompts.map { mutation -> PromptGeneration in
                                 return PromptGeneration(prompt: mutation.prompt, parentId: mutation.parentId)
                             }
-                            
+                            print("✅ Generated \(prompts.count) mutation prompts")
                             return prompts
                         } else if let crossoverPrompts = decoded.crossoverPrompts {
                             print("✅ Successfully decoded response into \(crossoverPrompts.count) crossover prompts")
@@ -244,7 +202,7 @@ actor PromptGenerationService {
                             let prompts = crossoverPrompts.map { crossover -> PromptGeneration in
                                 return PromptGeneration(prompt: crossover.prompt, parentIds: crossover.parentIds)
                             }
-                            
+                            print("✅ Generated \(prompts.count) crossover prompts")
                             return prompts
                         } else {
                             print("❌ Response contained neither mutation nor crossover prompts")
@@ -391,7 +349,7 @@ actor PromptGenerationService {
                             let prompts = mutatedPrompts.map { mutation -> PromptGeneration in
                                 return PromptGeneration(prompt: mutation.prompt, parentId: mutation.parentId)
                             }
-                            
+                            print("✅ Generated \(prompts.count) mutation prompts")
                             return prompts
                         } else if let crossoverPrompts = decoded.crossoverPrompts {
                             print("✅ Successfully decoded response into \(crossoverPrompts.count) crossover prompts")
@@ -400,7 +358,7 @@ actor PromptGenerationService {
                             let prompts = crossoverPrompts.map { crossover -> PromptGeneration in
                                 return PromptGeneration(prompt: crossover.prompt, parentIds: crossover.parentIds)
                             }
-                            
+                            print("✅ Generated \(prompts.count) crossover prompts")
                             return prompts
                         } else {
                             print("❌ Response contained neither mutation nor crossover prompts")
@@ -477,8 +435,15 @@ actor PromptGenerationService {
             )
             
             switch result {
-            case .success((let response, _)):
-                return response.prompts
+            case .success((let response, let rawContent)):
+                print("✅ Successfully decoded response into \(response.prompts.count) profile-based prompts")
+                
+                // Convert to PromptGeneration objects
+                let generatedPrompts = response.prompts.map { prompt -> PromptGeneration in
+                    return PromptGeneration(prompt: prompt.prompt)
+                }
+                print("✅ Generated \(generatedPrompts.count) profile-based prompts")
+                return generatedPrompts
             case .failure(let error):
                 throw error
             }
@@ -517,12 +482,131 @@ actor PromptGenerationService {
             )
             
             switch result {
-            case .success((let response, _)):
-                return response.prompts
+            case .success((let response, let rawContent)):
+                print("✅ Successfully decoded response into \(response.prompts.count) random prompts")
+                
+                // Convert to PromptGeneration objects
+                let generatedPrompts = response.prompts.map { prompt -> PromptGeneration in
+                    return PromptGeneration(prompt: prompt.prompt)
+                }
+                print("✅ Generated \(generatedPrompts.count) random prompts")
+                return generatedPrompts
             case .failure(let error):
                 throw error
             }
         }
+    }
+    
+    /// Smart filtering of prompts to maintain target distribution
+    private func filterPrompts(
+        mutations: [PromptGeneration],
+        crossovers: [PromptGeneration],
+        profileBased: [PromptGeneration],
+        random: [PromptGeneration],
+        targetDistribution: (
+            mutationCount: Int,
+            crossoverCount: Int,
+            profileBasedCount: Int,
+            explorationCount: Int
+        )
+    ) -> [PromptGeneration] {
+        print("\n📊 Smart filtering prompts to match distribution:")
+        print("Received counts:")
+        print("  - Mutations: \(mutations.count) (target: \(targetDistribution.mutationCount))")
+        print("  - Crossovers: \(crossovers.count) (target: \(targetDistribution.crossoverCount))")
+        print("  - Profile-based: \(profileBased.count) (target: \(targetDistribution.profileBasedCount))")
+        print("  - Random: \(random.count) (target: \(targetDistribution.explorationCount))")
+        
+        let totalTarget = targetDistribution.mutationCount + targetDistribution.crossoverCount +
+                         targetDistribution.profileBasedCount + targetDistribution.explorationCount
+        
+        // If we have exactly what we need in each category, return all prompts
+        if mutations.count == targetDistribution.mutationCount &&
+           crossovers.count == targetDistribution.crossoverCount &&
+           profileBased.count == targetDistribution.profileBasedCount &&
+           random.count == targetDistribution.explorationCount {
+            print("✨ Perfect distribution achieved!")
+            return mutations + crossovers + profileBased + random
+        }
+        
+        // Calculate what percentage each category should get if it generated more than needed
+        let mutationRatio = Double(targetDistribution.mutationCount) / Double(totalTarget)
+        let crossoverRatio = Double(targetDistribution.crossoverCount) / Double(totalTarget)
+        let profileRatio = Double(targetDistribution.profileBasedCount) / Double(totalTarget)
+        let randomRatio = Double(targetDistribution.explorationCount) / Double(totalTarget)
+        
+        // First pass: Take all prompts from categories that generated less than or equal to their target
+        var finalMutations = mutations
+        var finalCrossovers = crossovers
+        var finalProfileBased = profileBased
+        var finalRandom = random
+        
+        var remainingTarget = totalTarget
+        var remainingCategories = 0
+        
+        // Track how many slots we have left after taking all under-target categories
+        if mutations.count <= targetDistribution.mutationCount {
+            remainingTarget -= mutations.count
+        } else {
+            remainingCategories += 1
+        }
+        
+        if crossovers.count <= targetDistribution.crossoverCount {
+            remainingTarget -= crossovers.count
+        } else {
+            remainingCategories += 1
+        }
+        
+        if profileBased.count <= targetDistribution.profileBasedCount {
+            remainingTarget -= profileBased.count
+        } else {
+            remainingCategories += 1
+        }
+        
+        if random.count <= targetDistribution.explorationCount {
+            remainingTarget -= random.count
+        } else {
+            remainingCategories += 1
+        }
+        
+        // Second pass: Proportionally distribute remaining slots among categories that generated more
+        if remainingCategories > 0 {
+            let totalOverage = (mutations.count > targetDistribution.mutationCount ? mutations.count : 0) +
+                              (crossovers.count > targetDistribution.crossoverCount ? crossovers.count : 0) +
+                              (profileBased.count > targetDistribution.profileBasedCount ? profileBased.count : 0) +
+                              (random.count > targetDistribution.explorationCount ? random.count : 0)
+            
+            if mutations.count > targetDistribution.mutationCount {
+                let share = Int(Double(remainingTarget) * (Double(mutations.count) / Double(totalOverage)))
+                finalMutations = Array(mutations.prefix(share))
+            }
+            
+            if crossovers.count > targetDistribution.crossoverCount {
+                let share = Int(Double(remainingTarget) * (Double(crossovers.count) / Double(totalOverage)))
+                finalCrossovers = Array(crossovers.prefix(share))
+            }
+            
+            if profileBased.count > targetDistribution.profileBasedCount {
+                let share = Int(Double(remainingTarget) * (Double(profileBased.count) / Double(totalOverage)))
+                finalProfileBased = Array(profileBased.prefix(share))
+            }
+            
+            if random.count > targetDistribution.explorationCount {
+                let share = Int(Double(remainingTarget) * (Double(random.count) / Double(totalOverage)))
+                finalRandom = Array(random.prefix(share))
+            }
+        }
+        
+        let result = finalMutations + finalCrossovers + finalProfileBased + finalRandom
+        
+        print("\nFinal distribution:")
+        print("  - Mutations: \(finalMutations.count)")
+        print("  - Crossovers: \(finalCrossovers.count)")
+        print("  - Profile-based: \(finalProfileBased.count)")
+        print("  - Random: \(finalRandom.count)")
+        print("  - Total: \(result.count) (target: \(totalTarget))")
+        
+        return result
     }
     
     /// Generates prompts based on seed videos
@@ -536,6 +620,7 @@ actor PromptGenerationService {
     ) async -> LLMResponse<PromptGenerationResponse> {
         // Calculate prompt distribution
         let distribution = calculatePromptDistribution(likedCount: likedVideos.count)
+        print("❤️ User liked \(likedVideos.count) videos")
         print("📊 Prompt distribution:")
         print("  - Mutations: \(distribution.mutationCount)")
         print("  - Crossovers: \(distribution.crossoverCount)")
@@ -602,72 +687,157 @@ actor PromptGenerationService {
                 }
                 
                 // Process prompts as they complete
+                var mutationPrompts: [PromptGeneration] = []
+                var crossoverPrompts: [PromptGeneration] = []
+                var profileBasedPrompts: [PromptGeneration] = []
+                var randomPrompts: [PromptGeneration] = []
+                
                 for try await prompts in group {
-                    // Start processing these prompts immediately
-                    Task {
-                        do {
-                            try await generateVideosFromPrompts(prompts)
-                        } catch {
-                            print("❌ Error processing prompts: \(error.localizedDescription)")
+                    // Categorize prompts based on their type
+                    for prompt in prompts {
+                        if prompt.parentIds?.count == 2 {
+                            crossoverPrompts.append(prompt)
+                        } else if prompt.parentId != nil {
+                            mutationPrompts.append(prompt)
+                        } else if prompt.prompt.contains("random") || prompt.prompt.contains("exploration") {
+                            randomPrompts.append(prompt)
+                        } else {
+                            profileBasedPrompts.append(prompt)
                         }
                     }
-                    
-                    // Add to our collection
-                    allPrompts.append(contentsOf: prompts)
                 }
+                
+                // Apply smart filtering to maintain distribution
+                allPrompts = filterPrompts(
+                    mutations: mutationPrompts,
+                    crossovers: crossoverPrompts,
+                    profileBased: profileBasedPrompts,
+                    random: randomPrompts,
+                    targetDistribution: distribution
+                )
+                
+                // Process these prompts as part of the main flow
+                try await generateVideosFromPrompts(allPrompts)
             }
             
             // Check if we got enough prompts
             let expectedTotal = distribution.mutationCount + distribution.crossoverCount + 
                               distribution.profileBasedCount + distribution.explorationCount
             
-            if allPrompts.count < expectedTotal {
+            if allPrompts.count > expectedTotal {
+                print("⚠️ Received \(allPrompts.count) prompts, trimming to expected \(expectedTotal)")
+                allPrompts = Array(allPrompts.prefix(expectedTotal))
+            } else if allPrompts.count < expectedTotal {
                 print("⚠️ Only received \(allPrompts.count) prompts, expected \(expectedTotal)")
                 
-                // Calculate how many more we need of each type
-                let remainingMutations = distribution.mutationCount - allPrompts.filter { $0.parentId != nil }.count
-                let remainingCrossovers = distribution.crossoverCount - allPrompts.filter { $0.parentIds?.count == 2 }.count
-                let remainingProfileBased = distribution.profileBasedCount - allPrompts.filter { $0.parentId == nil && $0.parentIds == nil }.count
-                let remainingRandom = distribution.explorationCount - (allPrompts.count - (allPrompts.filter { $0.parentId != nil || $0.parentIds != nil }.count))
+                // Store the original prompts
+                let originalMutations = allPrompts.filter { $0.parentId != nil && $0.parentIds == nil }
+                let originalCrossovers = allPrompts.filter { $0.parentIds?.count == 2 }
+                let originalRandom = allPrompts.filter { $0.prompt.contains("random") || $0.prompt.contains("exploration") }
+                let originalProfileBased = allPrompts.filter { $0.parentId == nil && $0.parentIds == nil && !($0.prompt.contains("random") || $0.prompt.contains("exploration")) }
                 
-                // Try to generate the remaining prompts
-                if remainingMutations > 0 {
-                    print("🔄 Retrying mutation prompts for \(remainingMutations) prompts")
-                    let additional = try await generateMutationPrompts(
-                        count: remainingMutations,
-                        likedVideos: likedVideos,
-                        profile: profile
+                // Try one more batch of generation with all categories
+                try await withThrowingTaskGroup(of: [PromptGeneration].self) { group in
+                    // Add tasks for all categories to get more options
+                    if distribution.mutationCount > originalMutations.count {
+                        group.addTask {
+                            print("🔄 Retry: Starting mutation prompt generation for \(distribution.mutationCount - originalMutations.count) more prompts...")
+                            let prompts = try await self.generateMutationPrompts(
+                                count: distribution.mutationCount - originalMutations.count,
+                                likedVideos: likedVideos,
+                                profile: profile
+                            )
+                            print("✅ Retry: Generated \(prompts.count) mutation prompts")
+                            return prompts
+                        }
+                    }
+                    
+                    if distribution.crossoverCount > originalCrossovers.count {
+                        group.addTask {
+                            print("🔄 Retry: Starting crossover prompt generation for \(distribution.crossoverCount - originalCrossovers.count) more prompts...")
+                            let prompts = try await self.generateCrossoverPrompts(
+                                count: distribution.crossoverCount - originalCrossovers.count,
+                                likedVideos: likedVideos,
+                                profile: profile
+                            )
+                            print("✅ Retry: Generated \(prompts.count) crossover prompts")
+                            return prompts
+                        }
+                    }
+                    
+                    if distribution.profileBasedCount > originalProfileBased.count {
+                        group.addTask {
+                            print("🔄 Retry: Starting profile-based prompt generation for \(distribution.profileBasedCount - originalProfileBased.count) more prompts...")
+                            let prompts = try await self.generateProfileBasedPrompts(
+                                count: distribution.profileBasedCount - originalProfileBased.count,
+                                profile: profile
+                            )
+                            print("✅ Retry: Generated \(prompts.count) profile-based prompts")
+                            return prompts
+                        }
+                    }
+                    
+                    if distribution.explorationCount > originalRandom.count {
+                        group.addTask {
+                            print("🔄 Retry: Starting random prompt generation for \(distribution.explorationCount - originalRandom.count) more prompts...")
+                            let prompts = try await self.generateRandomPrompts(
+                                count: distribution.explorationCount - originalRandom.count
+                            )
+                            print("✅ Retry: Generated \(prompts.count) random prompts")
+                            return prompts
+                        }
+                    }
+                    
+                    // Process retry prompts as they complete
+                    var retryMutations: [PromptGeneration] = []
+                    var retryCrossovers: [PromptGeneration] = []
+                    var retryProfileBased: [PromptGeneration] = []
+                    var retryRandom: [PromptGeneration] = []
+                    
+                    for try await prompts in group {
+                        // Categorize prompts based on their type
+                        for prompt in prompts {
+                            if prompt.parentIds?.count == 2 {
+                                retryCrossovers.append(prompt)
+                            } else if prompt.parentId != nil {
+                                retryMutations.append(prompt)
+                            } else if prompt.prompt.contains("random") || prompt.prompt.contains("exploration") {
+                                retryRandom.append(prompt)
+                            } else {
+                                retryProfileBased.append(prompt)
+                            }
+                        }
+                    }
+                    
+                    // Combine original and retry prompts
+                    let combinedMutations = originalMutations + retryMutations
+                    let combinedCrossovers = originalCrossovers + retryCrossovers
+                    let combinedProfileBased = originalProfileBased + retryProfileBased
+                    let combinedRandom = originalRandom + retryRandom
+                    
+                    // Apply smart filtering to the combined set
+                    allPrompts = filterPrompts(
+                        mutations: combinedMutations,
+                        crossovers: combinedCrossovers,
+                        profileBased: combinedProfileBased,
+                        random: combinedRandom,
+                        targetDistribution: distribution
                     )
-                    try await generateVideosFromPrompts(additional)
-                    allPrompts.append(contentsOf: additional)
-                }
-                
-                if remainingCrossovers > 0 {
-                    print("🔄 Retrying crossover prompts for \(remainingCrossovers) prompts")
-                    let additional = try await generateCrossoverPrompts(
-                        count: remainingCrossovers,
-                        likedVideos: likedVideos,
-                        profile: profile
-                    )
-                    try await generateVideosFromPrompts(additional)
-                    allPrompts.append(contentsOf: additional)
-                }
-                
-                if remainingProfileBased > 0 {
-                    print("🔄 Retrying profile-based prompts for \(remainingProfileBased) prompts")
-                    let additional = try await generateProfileBasedPrompts(
-                        count: remainingProfileBased,
-                        profile: profile
-                    )
-                    try await generateVideosFromPrompts(additional)
-                    allPrompts.append(contentsOf: additional)
-                }
-                
-                if remainingRandom > 0 {
-                    print("🔄 Retrying random prompts for \(remainingRandom) prompts")
-                    let additional = try await generateRandomPrompts(count: remainingRandom)
-                    try await generateVideosFromPrompts(additional)
-                    allPrompts.append(contentsOf: additional)
+                    
+                    // Only generate videos for the new prompts
+                    let newPrompts = allPrompts.filter { prompt in
+                        !originalMutations.contains(where: { $0.prompt == prompt.prompt }) &&
+                        !originalCrossovers.contains(where: { $0.prompt == prompt.prompt }) &&
+                        !originalProfileBased.contains(where: { $0.prompt == prompt.prompt }) &&
+                        !originalRandom.contains(where: { $0.prompt == prompt.prompt })
+                    }
+                    
+                    if !newPrompts.isEmpty {
+                        print("🎬 Generating videos for \(newPrompts.count) new prompts")
+                        try await generateVideosFromPrompts(newPrompts)
+                    } else {
+                        print("ℹ️ No new prompts to process after filtering")
+                    }
                 }
             }
             

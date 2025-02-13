@@ -1,7 +1,7 @@
 import SwiftUI
 
 // Helper class to wrap a cached thumbnail with the time it was cached.
-class CachedThumbnail: NSObject {
+private class CachedThumbnail: NSObject {
     let uiImage: UIImage
     let date: Date
 
@@ -23,22 +23,18 @@ class ThumbnailCache {
     // Threshold for thumbnail cache expiration: 24 hours (86400 seconds)
     private let expirationInterval: TimeInterval = 86400
 
-    // Returns a SwiftUI.Image from the cached UIImage if available.
-    func getThumbnail(for key: String) -> Image? {
-        let now = Date()
-        let nsKey = key as NSString
-        if let cached = cache.object(forKey: nsKey) {
-            if now.timeIntervalSince(cached.date) < expirationInterval {
-                return Image(uiImage: cached.uiImage)
-            } else {
-                cache.removeObject(forKey: nsKey)
-            }
+    // MARK: - Public Methods
+    
+    /// Returns a SwiftUI.Image from the cached UIImage if available and not expired
+    func getCachedThumbnail(for key: String) -> Image? {
+        if let uiImage = getCachedUIImageThumbnail(for: key) {
+            return Image(uiImage: uiImage)
         }
         return nil
     }
     
-    // Returns the underlying UIImage if available
-    func getCachedUIImage(for key: String) -> UIImage? {
+    /// Returns the cached UIImage if available and not expired
+    func getCachedUIImageThumbnail(for key: String) -> UIImage? {
         let now = Date()
         let nsKey = key as NSString
         if let cached = cache.object(forKey: nsKey) {
@@ -51,7 +47,7 @@ class ThumbnailCache {
         return nil
     }
     
-    // Accepts a UIImage and caches it.
+    /// Caches a UIImage with the current timestamp
     func setThumbnail(_ image: UIImage, for key: String) {
         let cached = CachedThumbnail(uiImage: image, date: Date())
         cache.setObject(cached, forKey: key as NSString)

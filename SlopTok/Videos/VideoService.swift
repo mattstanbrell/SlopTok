@@ -116,9 +116,13 @@ class VideoService: ObservableObject {
     /// - Returns: UIImage if thumbnail could be loaded, nil otherwise
     func getUIImageThumbnail(for videoId: String) async -> UIImage? {
         await withCheckedContinuation { continuation in
-            ThumbnailGenerator.generateThumbnail(for: videoId) { _ in
-                let uiImage = ThumbnailCache.shared.getCachedUIImage(for: videoId)
-                continuation.resume(returning: uiImage)
+            Task {
+                await withCheckedContinuation { continuation in
+                    ThumbnailGenerator.getThumbnail(for: videoId) { _ in
+                        let uiImage = ThumbnailCache.shared.getCachedUIImageThumbnail(for: videoId)
+                        continuation.resume(returning: uiImage)
+                    }
+                }
             }
         }
     }
