@@ -29,9 +29,11 @@ struct GridView<T: VideoModel, FullScreenView: View>: View {
     @State private var selectedVideoId: String? = nil
 
     var body: some View {
+        let sortedVideos = videos.sorted { $0.timestamp > $1.timestamp }
+        
         ScrollView {
             LazyVGrid(columns: columns, spacing: gridSpacing) {
-                ForEach(videos, id: \.id) { video in
+                ForEach(sortedVideos, id: \.id) { video in
                     VideoThumbnail(videoId: video.id, thumbnail: thumbnails[video.id])
                         .onAppear {
                             generateThumbnail(for: video.id)
@@ -44,7 +46,6 @@ struct GridView<T: VideoModel, FullScreenView: View>: View {
             .padding(gridPadding)
         }
         .fullScreenCover(item: $selectedVideoId) { videoId in
-            let sortedVideos = videos.sorted { $0.timestamp > $1.timestamp }
             fullscreenContent(sortedVideos, videoId)
         }
     }
