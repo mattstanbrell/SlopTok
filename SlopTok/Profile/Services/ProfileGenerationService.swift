@@ -61,6 +61,9 @@ actor ProfileGenerationService {
         Analyze these AI-generated images and their generation prompts. Each pair shows an image the user liked and the prompt used to create it.
 
         Based on the visual content and themes in these liked images, suggest possible interests and patterns, while acknowledging the limited data.
+        Look for both explicit themes (directly mentioned in prompts) AND implicit themes (patterns that emerge across images but aren't explicitly stated).
+        Pay special attention to recurring visual elements, styles, or themes that might indicate user preferences even when not directly mentioned in prompts.
+
         For each interest:
         - Suggest a specific topic that matches the visual content they've engaged with
         - List at least 3 examples seen in the images and prompts, such as:
@@ -68,6 +71,8 @@ actor ProfileGenerationService {
           * Visual styles and techniques
           * Props and objects featured
           * Settings and environments
+          * Recurring themes or patterns across images
+          * Implicit preferences shown through image choices
 
         Example response:
         {
@@ -89,12 +94,14 @@ actor ProfileGenerationService {
               ]
             }
           ],
-          "description": "Based on this limited initial set of interactions, the user appears to show interest in detailed nature photography, particularly images that capture intricate botanical details. They've also engaged with architectural content, suggesting a possible appreciation for geometric forms and structural compositions. As more data becomes available, these preferences may evolve or reveal different patterns."
+          "description": "Based on this limited initial set of interactions, the user appears to show interest in detailed nature photography, particularly images that capture intricate botanical details. They've also engaged with architectural content, suggesting a possible appreciation for geometric forms and structural compositions. [Note any implicit patterns or themes noticed across images]. As more data becomes available, these preferences may evolve or reveal different patterns."
         }
 
         You MUST identify at least one interest and provide at least 3 examples for each interest.
         Make the description focus on their visual preferences and what kind of content they've engaged with so far, while acknowledging the preliminary nature of these observations.
-        Risqué content (eg cleavage, tight clothing, etc) is ok to include if the user's interests align with it, but avoid describing actual nudity.
+        If you notice patterns or themes across images that aren't explicitly stated in the prompts, be sure to include these observations in both the interests and description.
+        Risqué content (eg suggestive poses, form-fitting outfits, etc) is ok to include if it appears as a pattern in their interests, but avoid describing actual nudity.
+        When noting implicit themes, be tactful but clear about the pattern you've observed.
         """
         
         // Call Gemini with retry logic
@@ -215,41 +222,48 @@ actor ProfileGenerationService {
         let prompt = """
         Analyze these AI-generated images and their generation prompts. Each pair shows an image the user liked and the prompt used to create it.
 
-        Based on the visual content and themes in these liked images, identify interests and patterns.
+        Based on the visual content and themes in these liked images, suggest possible interests and patterns, while acknowledging the limited data.
+        Look for both explicit themes (directly mentioned in prompts) AND implicit themes (patterns that emerge across images but aren't explicitly stated).
+        Pay special attention to recurring visual elements, styles, or themes that might indicate user preferences even when not directly mentioned in prompts.
+
         For each interest:
-        - Choose a specific, well-defined topic that matches the visual content they engage with
+        - Suggest a specific topic that matches the visual content they've engaged with
         - List at least 3 examples seen in the images and prompts, such as:
           * Specific subjects shown
           * Visual styles and techniques
           * Props and objects featured
           * Settings and environments
+          * Recurring themes or patterns across images
+          * Implicit preferences shown through image choices
 
         Example response:
         {
           "interests": [
             {
-              "topic": "Portrait Photography",
+              "topic": "Nature Photography",
               "examples": [
-                "dramatic side lighting",
-                "urban backdrops",
-                "candid expressions"
+                "macro flower details",
+                "soft natural lighting",
+                "botanical compositions"
               ]
             },
             {
-              "topic": "Street Fashion",
+              "topic": "Architectural Photography",
               "examples": [
-                "high contrast aesthetics",
-                "urban streetwear styling",
-                "dynamic poses"
+                "geometric patterns",
+                "dramatic building angles",
+                "minimalist structures"
               ]
             }
           ],
-          "description": "The user shows a strong interest in portrait and fashion photography with an urban edge. Their preferences lean towards dramatic lighting and contemporary styling, particularly in city environments. The images they engage with often feature a blend of candid moments and styled compositions."
+          "description": "Based on this limited initial set of interactions, the user appears to show interest in detailed nature photography, particularly images that capture intricate botanical details. They've also engaged with architectural content, suggesting a possible appreciation for geometric forms and structural compositions. [Note any implicit patterns or themes noticed across images]. As more data becomes available, these preferences may evolve or reveal different patterns."
         }
 
         You MUST identify at least one interest and provide at least 3 examples for each interest.
-        Make the description focus on their visual preferences and what kind of content they've engaged with.
-        Risqué content (eg cleavage, tight clothing, etc) is ok to include if the user's interests align with it, but avoid describing actual nudity.
+        Make the description focus on their visual preferences and what kind of content they've engaged with so far, while acknowledging the preliminary nature of these observations.
+        If you notice patterns or themes across images that aren't explicitly stated in the prompts, be sure to include these observations in both the interests and description.
+        Risqué content (eg suggestive poses, form-fitting outfits, etc) is ok to include if it appears as a pattern in their interests, but avoid describing actual nudity.
+        When noting implicit themes, be tactful but clear about the pattern you've observed.
         """
         
         // Call Gemini with retry logic
@@ -437,6 +451,8 @@ actor ProfileGenerationService {
         1. Focuses on their strongest interests (higher weights)
         2. Notes any significant changes or trends
         3. Highlights what aspects of these topics they engage with
+
+        Risqué content (eg suggestive poses, form-fitting outfits, etc) is ok to include if it appears as a pattern in their interests, but avoid describing actual nudity.
         """
         
         let descriptionResult = await LLMService.shared.complete(

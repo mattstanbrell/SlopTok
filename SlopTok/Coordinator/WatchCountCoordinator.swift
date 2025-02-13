@@ -14,6 +14,7 @@ class WatchCountCoordinator: ObservableObject {
     private let promptGenerationThreshold = 20
     
     /// Number of videos to watch before updating profile
+    /// TODO change back to 50
     private let profileUpdateThreshold = 25
     
     private init() {}
