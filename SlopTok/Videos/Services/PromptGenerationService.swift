@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import FirebaseStorage
 import SwiftUI
+import FirebaseVertexAI
 
 /// Helper for exponential backoff retries
 private struct RetryHelper {
@@ -50,7 +51,17 @@ actor PromptGenerationService {
     /// Shared instance
     static let shared = PromptGenerationService()
     
-    private init() {}
+    private let model: GenerativeModel
+    
+    private init() {
+        self.model = VertexAIService.createGeminiModel(
+            modelName: "gemini-2.0-flash",
+            generationConfig: GenerationConfig(
+                responseMIMEType: "application/json",
+                responseSchema: PromptGenerationGeminiSchema.schema
+            )
+        )
+    }
     
     /// Calculate the distribution of prompt types based on number of liked prompts
     private func calculatePromptDistribution(likedCount: Int) -> (
@@ -104,9 +115,30 @@ actor PromptGenerationService {
         likedVideos: [(id: String, prompt: String)],
         profile: UserProfile
     ) async throws -> [PromptGeneration] {
-        let formattedPrompts = likedVideos
-            .map { "- \($0.prompt) (ID: \($0.id))" }
-            .joined(separator: "\n")
+        // Load thumbnails for liked videos
+        var thumbnailImages: [(label: String, image: UIImage?)] = []
+        
+        // Get thumbnails for all videos
+        for (index, video) in likedVideos.enumerated() {
+            if let image = await VideoService.shared.getUIImageThumbnail(for: video.id) {
+                thumbnailImages.append(("Image \(index + 1)", image))
+            }
+        }
+        
+        // Filter out any nil images and prepare for analysis
+        let validImages = thumbnailImages.compactMap { label, image -> (label: String, image: UIImage)? in
+            if let image = image {
+                return (label: label, image: image)
+            }
+            return nil
+        }
+        
+        // Build the parts array with prompts and images
+        var parts: [PartsRepresentable] = []
+        for (index, image) in validImages.enumerated() {
+            parts.append("Image \(index + 1) Prompt: \(likedVideos[index].prompt) (ID: \(likedVideos[index].id))" as PartsRepresentable)
+            parts.append(image.image as PartsRepresentable)
+        }
         
         let formattedInterests = profile.interests
             .map { interest in
@@ -117,8 +149,9 @@ actor PromptGenerationService {
             }
             .joined(separator: "\n")
         
+        // Build the prompt
         let prompt = """
-        Generate \(count) new image prompts by mutating these prompts the user liked.
+        Generate \(count) new image prompts by mutating these prompts and images the user liked.
         Each new prompt should be a variation of ONE parent prompt, keeping its core theme but varying elements like:
         - The specific subject or focal point
         - The visual style and composition
@@ -127,9 +160,6 @@ actor PromptGenerationService {
         - The perspective and framing
         - The artistic technique or medium
         - The color palette and tones
-        
-        Liked image prompts:
-        \(formattedPrompts)
         
         User's interests for context:
         \(formattedInterests)
@@ -142,40 +172,83 @@ actor PromptGenerationService {
         - Texture and materials
         - Color harmony
         - Visual storytelling through a single frame
-        - Artistic style (photorealistic, stylized, illustrated, etc.)
+        - Artistic style (photorealistic, stylized, illustrated, animated, etc.)
         
         Example good prompt:
-        "A close-up, macro photography stock photo of a strawberry intricately sculpted into the shape of a hummingbird in mid-flight, its wings a blur as it sips nectar from a vibrant, tubular flower. The backdrop features a lush, colorful garden with a soft, bokeh effect, creating a dreamlike atmosphere. The image is exceptionally detailed and captured with a shallow depth of field, ensuring a razor-sharp focus on the strawberry-hummingbird and gentle fading of the background. The high resolution, professional photographers style, and soft lighting illuminate the scene in a very detailed manner, professional color grading amplifies the vibrant colors and creates an image with exceptional clarity. The depth of field makes the hummingbird and flower stand out starkly against the bokeh background."
+        "A close-up, macro photography stock photo of a strawberry intricately sculpted into the shape of a hummingbird in mid-flight, its wings a blur as it sips nectar from a vibrant, tubular flower. The backdrop features a lush, colorful garden with a soft, bokeh effect, creating a dreamlike atmosphere. The image is exceptionally detailed and captured with a shallow depth of field, ensuring a razor-sharp focus on the strawberry-hummingbird and gentle fading of the background. The high resolution, professional photographers style, and soft lighting illuminate the scene in a very detailed manner, professional color grading amplifies the vibrant colors and creates an image with exceptional clarity. The depth of field makes the hummingbird and flower stand out starkly against the bokeh background." (ID: abc123)
         
-        Example mutation:
+        Example response:
         {
-            "prompts": [
-                {
-                    "prompt": "A close-up, macro photography capture of the same strawberry-hummingbird now illuminated by moonlight, creating an ethereal night garden scene. Tiny dewdrops glisten on its carved feathers, catching the moonlight like diamonds. The background garden is bathed in cool blue tones with fireflies providing points of warm light, their glow reflecting in the dewdrops. Shot with the same exceptional detail and shallow depth of field, but now emphasizing the interplay of light and shadow in the nocturnal setting",
-                    "parentId": "abc123"
-                }
-            ]
+          "mutatedPrompts": [
+            {
+              "prompt": "A close-up, macro photography capture of a strawberry intricately sculpted into a hummingbird, illuminated by ethereal moonlight in a night garden scene. Tiny dewdrops glisten on its carved feathers, catching the moonlight like diamonds. The background garden is bathed in cool blue tones with fireflies providing points of warm light, their glow reflecting in the dewdrops. Shot with exceptional detail and shallow depth of field, emphasizing the interplay of light and shadow in the nocturnal setting",
+              "parentId": "abc123"
+            }
+          ]
         }
         
-        Each prompt MUST have exactly one parentId from the liked prompts.
-        Generate \(count) unique prompts.
+        Generate \(count) unique prompts, each building upon one of the provided images.
+        If there are less than \(count) images, mutate some of the prompts multiple times.
+        For each prompt, include the parentId of the source image.
         """
         
-        return try await RetryHelper.retry {
-            let result = await LLMService.shared.complete(
-                userPrompt: prompt,
-                systemPrompt: "You are generating creative photo prompts by mutating successful prompts. Focus on creating variations that maintain the core appeal while exploring new visual elements. Each prompt must be a mutation of exactly one parent prompt.",
-                responseType: PromptGenerationResponse.self,
-                schema: PromptGenerationSchema.mutationSchema
-            )
-            
-            switch result {
-            case .success((let response, _)):
-                return response.prompts
-            case .failure(let error):
-                throw error
+        // Call Gemini with retry logic
+        let maxRetries = 2
+        var lastError: Error?
+        
+        // Log the full prompt we're sending
+        print("\n📝 Sending prompt to Gemini:")
+        print("=== PROMPT START ===")
+        print(prompt)
+        print("=== PROMPT END ===\n")
+        
+        for attempt in 0...maxRetries {
+            do {
+                if attempt > 0 {
+                    print("🔄 Retry attempt \(attempt) for mutation prompts")
+                    try await Task.sleep(nanoseconds: UInt64(1_000_000_000 * Double(attempt)))
+                }
+                
+                let response = try await model.generateContent(parts + [prompt as PartsRepresentable])
+                
+                if let text = response.text {
+                    print("\n📥 Received response from Gemini:")
+                    print("=== RESPONSE START ===")
+                    print(text)
+                    print("=== RESPONSE END ===\n")
+                    
+                    if let data = text.data(using: .utf8),
+                       let decoded = try? JSONDecoder().decode(PromptGenerationGeminiResponse.self, from: data) {
+                        print("✅ Successfully decoded response into \(decoded.mutatedPrompts.count) prompts")
+                        
+                        // Convert to PromptGeneration objects
+                        let prompts = decoded.mutatedPrompts.map { mutation -> PromptGeneration in
+                            return PromptGeneration(prompt: mutation.prompt, parentId: mutation.parentId)
+                        }
+                        
+                        return prompts
+                    } else {
+                        print("❌ Failed to decode response as PromptGenerationGeminiResponse")
+                        throw LLMError.apiError("Invalid response format")
+                    }
+                } else {
+                    print("❌ Empty response from Gemini")
+                    throw LLMError.apiError("Empty response")
+                }
+            } catch {
+                lastError = error
+                if attempt == maxRetries {
+                    print("❌ All retry attempts failed for mutation prompts")
+                    throw error
+                }
             }
         }
+        
+        throw lastError ?? LLMError.systemError(NSError(
+            domain: "PromptGenerationService",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "Unknown error during mutation generation"]
+        ))
     }
     
     /// Generate crossover prompts from liked prompts

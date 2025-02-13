@@ -37,4 +37,18 @@ struct PromptGeneration: Codable {
 struct PromptGenerationResponse: Codable {
     /// The array of generated prompts
     let prompts: [PromptGeneration]
+}
+
+/// Response from Gemini for generating new image prompts
+struct PromptGenerationGeminiResponse: Codable {
+    /// A single mutated prompt
+    struct MutatedPrompt: Codable {
+        /// The generated prompt
+        let prompt: String
+        /// ID of the parent prompt this was mutated from
+        let parentId: String
+    }
+    
+    /// Array of mutated prompts
+    let mutatedPrompts: [MutatedPrompt]
 } 
