@@ -7,7 +7,7 @@ import FirebaseVertexAI
 /// Helper for exponential backoff retries
 private struct RetryHelper {
     /// Maximum number of retries
-    static let maxRetries = 3
+    static let maxRetries = 5
     
     /// Executes a task with exponential backoff retries
     /// - Parameters:
@@ -51,14 +51,23 @@ actor PromptGenerationService {
     /// Shared instance
     static let shared = PromptGenerationService()
     
-    private let model: GenerativeModel
+    private let mutationModel: GenerativeModel
+    private let crossoverModel: GenerativeModel
     
     private init() {
-        self.model = VertexAIService.createGeminiModel(
+        self.mutationModel = VertexAIService.createGeminiModel(
             modelName: "gemini-2.0-flash",
             generationConfig: GenerationConfig(
                 responseMIMEType: "application/json",
-                responseSchema: PromptGenerationGeminiSchema.schema
+                responseSchema: PromptGenerationGeminiSchema.mutationSchema
+            )
+        )
+        
+        self.crossoverModel = VertexAIService.createGeminiModel(
+            modelName: "gemini-2.0-flash",
+            generationConfig: GenerationConfig(
+                responseMIMEType: "application/json",
+                responseSchema: PromptGenerationGeminiSchema.crossoverSchema
             )
         )
     }
@@ -193,7 +202,7 @@ actor PromptGenerationService {
         """
         
         // Call Gemini with retry logic
-        let maxRetries = 2
+        let maxRetries = 5
         var lastError: Error?
         
         // Log the full prompt we're sending
@@ -209,7 +218,7 @@ actor PromptGenerationService {
                     try await Task.sleep(nanoseconds: UInt64(1_000_000_000 * Double(attempt)))
                 }
                 
-                let response = try await model.generateContent(parts + [prompt as PartsRepresentable])
+                let response = try await mutationModel.generateContent(parts + [prompt as PartsRepresentable])
                 
                 if let text = response.text {
                     print("\n📥 Received response from Gemini:")
@@ -219,14 +228,28 @@ actor PromptGenerationService {
                     
                     if let data = text.data(using: .utf8),
                        let decoded = try? JSONDecoder().decode(PromptGenerationGeminiResponse.self, from: data) {
-                        print("✅ Successfully decoded response into \(decoded.mutatedPrompts.count) prompts")
-                        
-                        // Convert to PromptGeneration objects
-                        let prompts = decoded.mutatedPrompts.map { mutation -> PromptGeneration in
-                            return PromptGeneration(prompt: mutation.prompt, parentId: mutation.parentId)
+                        if let mutatedPrompts = decoded.mutatedPrompts {
+                            print("✅ Successfully decoded response into \(mutatedPrompts.count) mutation prompts")
+                            
+                            // Convert to PromptGeneration objects
+                            let prompts = mutatedPrompts.map { mutation -> PromptGeneration in
+                                return PromptGeneration(prompt: mutation.prompt, parentId: mutation.parentId)
+                            }
+                            
+                            return prompts
+                        } else if let crossoverPrompts = decoded.crossoverPrompts {
+                            print("✅ Successfully decoded response into \(crossoverPrompts.count) crossover prompts")
+                            
+                            // Convert to PromptGeneration objects
+                            let prompts = crossoverPrompts.map { crossover -> PromptGeneration in
+                                return PromptGeneration(prompt: crossover.prompt, parentIds: crossover.parentIds)
+                            }
+                            
+                            return prompts
+                        } else {
+                            print("❌ Response contained neither mutation nor crossover prompts")
+                            throw LLMError.apiError("Invalid response format - no prompts found")
                         }
-                        
-                        return prompts
                     } else {
                         print("❌ Failed to decode response as PromptGenerationGeminiResponse")
                         throw LLMError.apiError("Invalid response format")
@@ -257,9 +280,30 @@ actor PromptGenerationService {
         likedVideos: [(id: String, prompt: String)],
         profile: UserProfile
     ) async throws -> [PromptGeneration] {
-        let formattedPrompts = likedVideos
-            .map { "- \($0.prompt) (ID: \($0.id))" }
-            .joined(separator: "\n")
+        // Load thumbnails for liked videos
+        var thumbnailImages: [(label: String, image: UIImage?)] = []
+        
+        // Get thumbnails for all videos
+        for (index, video) in likedVideos.enumerated() {
+            if let image = await VideoService.shared.getUIImageThumbnail(for: video.id) {
+                thumbnailImages.append(("Image \(index + 1)", image))
+            }
+        }
+        
+        // Filter out any nil images and prepare for analysis
+        let validImages = thumbnailImages.compactMap { label, image -> (label: String, image: UIImage)? in
+            if let image = image {
+                return (label: label, image: image)
+            }
+            return nil
+        }
+        
+        // Build the parts array with prompts and images
+        var parts: [PartsRepresentable] = []
+        for (index, image) in validImages.enumerated() {
+            parts.append("Image \(index + 1) Prompt: \(likedVideos[index].prompt) (ID: \(likedVideos[index].id))" as PartsRepresentable)
+            parts.append(image.image as PartsRepresentable)
+        }
         
         let formattedInterests = profile.interests
             .map { interest in
@@ -271,7 +315,7 @@ actor PromptGenerationService {
             .joined(separator: "\n")
         
         let prompt = """
-        Generate \(count) new image prompts by combining elements from pairs of prompts the user liked.
+        Generate \(count) new image prompts by combining elements from pairs of prompts and images the user liked.
         Each new prompt should creatively merge elements from TWO parent prompts, considering:
         - How to meaningfully combine their subjects
         - How to blend their visual styles
@@ -279,9 +323,6 @@ actor PromptGenerationService {
         - How to harmonize their lighting and atmosphere
         - How to integrate their artistic techniques
         - How to combine their color palettes
-        
-        Liked image prompts:
-        \(formattedPrompts)
         
         User's interests for context:
         \(formattedInterests)
@@ -296,39 +337,97 @@ actor PromptGenerationService {
         - Visual storytelling through a single frame
         - Artistic style (photorealistic, stylized, illustrated, etc.)
         
-        Example good prompts for crossover:
-        1. "A close-up, macro photography stock photo of a strawberry intricately sculpted into the shape of a hummingbird in mid-flight, its wings a blur as it sips nectar from a vibrant, tubular flower..."
-        2. "A dramatic portrait of a dragon fruit carved into an Eastern dragon, with intricate scales catching the light, positioned against a misty mountainous backdrop..."
+        Example good prompt 1:
+        "A close-up, macro photography stock photo of a strawberry intricately sculpted into the shape of a hummingbird in mid-flight, its wings a blur as it sips nectar from a vibrant, tubular flower. The backdrop features a lush, colorful garden with a soft, bokeh effect, creating a dreamlike atmosphere. The image is exceptionally detailed and captured with a shallow depth of field, ensuring a razor-sharp focus on the strawberry-hummingbird and gentle fading of the background. The high resolution, professional photographers style, and soft lighting illuminate the scene in a very detailed manner, professional color grading amplifies the vibrant colors and creates an image with exceptional clarity. The depth of field makes the hummingbird and flower stand out starkly against the bokeh background." (ID: abc123)
         
-        Example crossover:
+        Example good prompt 2:
+        "A dramatic macro photograph of a dragon fruit carved into an intricate Eastern dragon, its serpentine body coiled around a moonlit pagoda made of dragonfruit flesh. The dragon's scales are meticulously detailed, each one individually carved to catch the light. The scene is illuminated by traditional paper lanterns, casting a warm glow that contrasts with the cool moonlight. Shot with professional lighting and a macro lens to capture the intricate details of the carving, while maintaining a dreamy atmosphere with selective focus." (ID: def456)
+        
+        Example response:
         {
-            "prompts": [
-                {
-                    "prompt": "A masterfully executed fusion of two fruit sculptures: a strawberry hummingbird and a dragon fruit dragon, locked in an intricate aerial dance. The hummingbird's delicate form contrasts with the dragon's serpentine body, both captured in stunning macro detail. Professional lighting emphasizes the unique textures of each fruit, while the shallow depth of field creates a dreamy backdrop of a misty Chinese garden. The high-resolution capture ensures every carved scale and feather is crystal clear",
-                    "parentIds": ["abc123", "def456"]
-                }
-            ]
+          "crossoverPrompts": [
+            {
+              "prompt": "A masterfully executed macro photograph of a fruit sculpture garden where a strawberry hummingbird and dragon fruit dragon dance through the air together. The scene captures their aerial ballet with crystalline clarity - the hummingbird's delicate carved wings complementing the dragon's flowing serpentine form. The backdrop features a fusion of Eastern and Western garden elements: vibrant tubular flowers intertwined with moonlit pagoda archways. Professional lighting combines soft daylight and warm lantern glow, while selective focus emphasizes the intricate details of both creatures against a dreamy, bokeh-rich background",
+              "parentIds": ["abc123", "def456"]
+            }
+          ]
         }
         
-        Each prompt MUST have exactly two parentIds from the liked prompts.
-        Generate \(count) unique prompts.
+        Generate \(count) unique prompts, each combining elements from TWO of the provided images.
+        For each prompt, include the parentIds of BOTH source images.
         """
         
-        return try await RetryHelper.retry {
-            let result = await LLMService.shared.complete(
-                userPrompt: prompt,
-                systemPrompt: "You are generating creative photo prompts by combining elements from pairs of successful prompts. Focus on meaningful combinations that create compelling new visuals. Each prompt must combine exactly two parent prompts.",
-                responseType: PromptGenerationResponse.self,
-                schema: PromptGenerationSchema.crossoverSchema
-            )
-            
-            switch result {
-            case .success((let response, _)):
-                return response.prompts
-            case .failure(let error):
-                throw error
+        // Call Gemini with retry logic
+        let maxRetries = 5
+        var lastError: Error?
+        
+        // Log the full prompt we're sending
+        print("\n📝 Sending prompt to Gemini:")
+        print("=== PROMPT START ===")
+        print(prompt)
+        print("=== PROMPT END ===\n")
+        
+        for attempt in 0...maxRetries {
+            do {
+                if attempt > 0 {
+                    print("🔄 Retry attempt \(attempt) for crossover prompts")
+                    try await Task.sleep(nanoseconds: UInt64(1_000_000_000 * Double(attempt)))
+                }
+                
+                let response = try await crossoverModel.generateContent(parts + [prompt as PartsRepresentable])
+                
+                if let text = response.text {
+                    print("\n📥 Received response from Gemini:")
+                    print("=== RESPONSE START ===")
+                    print(text)
+                    print("=== RESPONSE END ===\n")
+                    
+                    if let data = text.data(using: .utf8),
+                       let decoded = try? JSONDecoder().decode(PromptGenerationGeminiResponse.self, from: data) {
+                        if let mutatedPrompts = decoded.mutatedPrompts {
+                            print("✅ Successfully decoded response into \(mutatedPrompts.count) mutation prompts")
+                            
+                            // Convert to PromptGeneration objects
+                            let prompts = mutatedPrompts.map { mutation -> PromptGeneration in
+                                return PromptGeneration(prompt: mutation.prompt, parentId: mutation.parentId)
+                            }
+                            
+                            return prompts
+                        } else if let crossoverPrompts = decoded.crossoverPrompts {
+                            print("✅ Successfully decoded response into \(crossoverPrompts.count) crossover prompts")
+                            
+                            // Convert to PromptGeneration objects
+                            let prompts = crossoverPrompts.map { crossover -> PromptGeneration in
+                                return PromptGeneration(prompt: crossover.prompt, parentIds: crossover.parentIds)
+                            }
+                            
+                            return prompts
+                        } else {
+                            print("❌ Response contained neither mutation nor crossover prompts")
+                            throw LLMError.apiError("Invalid response format - no prompts found")
+                        }
+                    } else {
+                        print("❌ Failed to decode response as PromptGenerationGeminiResponse")
+                        throw LLMError.apiError("Invalid response format")
+                    }
+                } else {
+                    print("❌ Empty response from Gemini")
+                    throw LLMError.apiError("Empty response")
+                }
+            } catch {
+                lastError = error
+                if attempt == maxRetries {
+                    print("❌ All retry attempts failed for crossover prompts")
+                    throw error
+                }
             }
         }
+        
+        throw lastError ?? LLMError.systemError(NSError(
+            domain: "PromptGenerationService",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "Unknown error during crossover generation"]
+        ))
     }
     
     /// Generate prompts based on user profile
@@ -635,7 +734,7 @@ actor PromptGenerationService {
                     print("🎯 Starting task \(index + 1)/\(prompts.count)")
                     
                     // Retry logic for the entire pipeline
-                    let maxRetries = 2
+                    let maxRetries = 5
                     var lastError: Error?
                     
                     for attempt in 0...maxRetries {

@@ -49,6 +49,16 @@ struct PromptGenerationGeminiResponse: Codable {
         let parentId: String
     }
     
-    /// Array of mutated prompts
-    let mutatedPrompts: [MutatedPrompt]
+    /// A single crossover prompt
+    struct CrossoverPrompt: Codable {
+        /// The generated prompt
+        let prompt: String
+        /// IDs of the parent prompts this was created from
+        let parentIds: [String]
+    }
+    
+    /// Array of mutated prompts (for mutation responses)
+    let mutatedPrompts: [MutatedPrompt]?
+    /// Array of crossover prompts (for crossover responses)
+    let crossoverPrompts: [CrossoverPrompt]?
 } 
