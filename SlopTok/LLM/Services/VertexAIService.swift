@@ -7,8 +7,32 @@ class VertexAIService {
     private let vertex = VertexAI.vertexAI()
     private let model: GenerativeModel
     
+    /// Creates a Gemini model with consistent safety settings
+    /// - Parameters:
+    ///   - modelName: Name of the model to use (e.g. "gemini-2.0-flash")
+    ///   - generationConfig: Optional generation config for structured output
+    /// - Returns: Configured GenerativeModel instance
+    static func createGeminiModel(
+        modelName: String,
+        generationConfig: GenerationConfig? = nil
+    ) -> GenerativeModel {
+        let safetySettings = [
+            SafetySetting(harmCategory: .harassment, threshold: .blockOnlyHigh),
+            SafetySetting(harmCategory: .hateSpeech, threshold: .blockOnlyHigh),
+            SafetySetting(harmCategory: .sexuallyExplicit, threshold: .blockOnlyHigh),
+            SafetySetting(harmCategory: .dangerousContent, threshold: .blockOnlyHigh),
+            SafetySetting(harmCategory: .civicIntegrity, threshold: .blockOnlyHigh)
+        ]
+        
+        return VertexAI.vertexAI().generativeModel(
+            modelName: modelName,
+            generationConfig: generationConfig,
+            safetySettings: safetySettings
+        )
+    }
+    
     private init() {
-        self.model = vertex.generativeModel(modelName: "gemini-2.0-flash")
+        self.model = Self.createGeminiModel(modelName: "gemini-2.0-flash")
     }
     
     func analyzeText(_ prompt: String) async throws -> String {
