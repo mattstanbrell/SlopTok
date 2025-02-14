@@ -120,9 +120,10 @@ class WatchCountCoordinator: ObservableObject {
             print("🔍 Found \(interactions.documents.count) liked videos since last generation")
             
             // Extract prompts from liked videos
-            let likedVideos = interactions.documents.compactMap { doc -> (id: String, prompt: String)? in
-                guard let prompt = doc.data()["prompt"] as? String else { return nil }
-                return (id: doc.documentID, prompt: prompt)
+            let likedVideos = interactions.documents.compactMap { doc -> LikedVideo? in
+                guard let prompt = doc.data()["prompt"] as? String,
+                      let timestamp = doc.data()["liked_timestamp"] as? Timestamp else { return nil }
+                return LikedVideo(id: doc.documentID, timestamp: timestamp.dateValue(), prompt: prompt)
             }
             print("📝 Extracted \(likedVideos.count) prompts from liked videos")
             

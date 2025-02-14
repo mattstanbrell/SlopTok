@@ -3,95 +3,88 @@ import AVFoundation
 import FirebaseStorage
 
 class ThumbnailGenerator {
-    static func getThumbnail(for videoId: String, completion: @escaping (Image?) -> Void) {
+    static func getThumbnail(for videoId: String) async -> Image? {
         // First check ThumbnailCache for SwiftUI Image
         if let cachedThumb = ThumbnailCache.shared.getCachedThumbnail(for: videoId) {
-            DispatchQueue.main.async {
-                completion(cachedThumb)
-            }
-            return
+            return cachedThumb
         }
         
         // Generate if not found
-        generateThumbnailUIImage(for: videoId) { uiImage in
-            DispatchQueue.main.async {
-                completion(uiImage.map { Image(uiImage: $0) })
-            }
+        if let uiImage = await generateThumbnailUIImage(for: videoId) {
+            return Image(uiImage: uiImage)
         }
+        return nil
     }
     
-    static func getThumbnailUIImage(for videoId: String, completion: @escaping (UIImage?) -> Void) {
+    static func getThumbnailUIImage(for videoId: String) async -> UIImage? {
         // First check ThumbnailCache for UIImage
         if let cachedThumb = ThumbnailCache.shared.getCachedUIImageThumbnail(for: videoId) {
-            DispatchQueue.main.async {
-                completion(cachedThumb)
-            }
-            return
+            return cachedThumb
         }
         
         // Generate if not found
-        generateThumbnailUIImage(for: videoId) { uiImage in
-            DispatchQueue.main.async {
-                completion(uiImage)
-            }
-        }
+        return await generateThumbnailUIImage(for: videoId)
     }
     
-    private static func generateThumbnailUIImage(for videoId: String, completion: @escaping (UIImage?) -> Void) {
-        // First check if we have the video file cached locally
-        VideoFileCache.shared.getLocalVideoURL(for: videoId, remoteURL: nil) { localURL in
-            if let localURL = localURL {
-                generateThumbnailFromLocalVideo(localURL: localURL, videoId: videoId, completion: completion)
-                return
-            }
+    private static func generateThumbnailUIImage(for videoId: String) async -> UIImage? {
+        // First check if we have the video file cached locally without remote URL
+        let localURL = VideoFileCache.shared.localFileURL(for: videoId)
+        if FileManager.default.fileExists(atPath: localURL.path) {
+            return await generateThumbnailFromLocalVideo(localURL: localURL, videoId: videoId)
+        }
+        
+        // If no local file, get the storage path and download URL
+        let storagePath = await VideoService.shared.getVideoPath(videoId)
+        let storage = Storage.storage()
+        let videoRef = storage.reference(withPath: storagePath)
+        
+        do {
+            let remoteURL = try await videoRef.downloadURL()
             
-            // If no local file, get the storage path and download URL
-            let storagePath = VideoService.shared.getVideoPath(videoId)
-            let storage = Storage.storage()
-            let videoRef = storage.reference(withPath: storagePath)
-            
-            videoRef.downloadURL { url, error in
-                guard let remoteURL = url else {
-                    print("Could not get download URL for videoId: \(videoId), error: \(error?.localizedDescription ?? "unknown")")
-                    completion(nil)
-                    return
-                }
-                
-                // Get the local video file using the remote URL
+            // Download the video using the cache
+            return await withCheckedContinuation { continuation in
                 VideoFileCache.shared.getLocalVideoURL(for: videoId, remoteURL: remoteURL) { localURL in
-                    guard let localURL = localURL else {
-                        print("Local video URL is nil for videoId: \(videoId)")
-                        completion(nil)
+                    if let localURL = localURL {
+                        Task {
+                            let thumbnail = await generateThumbnailFromLocalVideo(localURL: localURL, videoId: videoId)
+                            continuation.resume(returning: thumbnail)
+                        }
                         return
                     }
                     
-                    generateThumbnailFromLocalVideo(localURL: localURL, videoId: videoId, completion: completion)
+                    print("❌ Failed to access video file for thumbnail generation")
+                    continuation.resume(returning: nil)
                 }
             }
+        } catch {
+            print("❌ Failed to get download URL for video \(videoId): \(error.localizedDescription)")
+            return nil
         }
     }
     
-    private static func generateThumbnailFromLocalVideo(localURL: URL, videoId: String, completion: @escaping (UIImage?) -> Void) {
-        let asset = AVAsset(url: localURL)
-        asset.loadValuesAsynchronously(forKeys: ["preferredTransform"]) {
-            var error: NSError?
-            let status = asset.statusOfValue(forKey: "preferredTransform", error: &error)
-            if status == .loaded {
-                let imageGenerator = AVAssetImageGenerator(asset: asset)
-                imageGenerator.appliesPreferredTrackTransform = true
-                do {
-                    let cgImage = try imageGenerator.copyCGImage(at: CMTime(seconds: 0.5, preferredTimescale: 60), actualTime: nil)
-                    let thumbnailUIImage = UIImage(cgImage: cgImage)
-                    // Cache the thumbnail using the existing UIKit UIImage internally.
-                    ThumbnailCache.shared.setThumbnail(thumbnailUIImage, for: videoId)
-                    completion(thumbnailUIImage)
-                } catch {
-                    print("Error generating thumbnail: \(error.localizedDescription)")
-                    completion(nil)
+    private static func generateThumbnailFromLocalVideo(localURL: URL, videoId: String) async -> UIImage? {
+        return await withCheckedContinuation { continuation in
+            let asset = AVAsset(url: localURL)
+            asset.loadValuesAsynchronously(forKeys: ["preferredTransform"]) {
+                var error: NSError?
+                let status = asset.statusOfValue(forKey: "preferredTransform", error: &error)
+                if status == .loaded {
+                    let imageGenerator = AVAssetImageGenerator(asset: asset)
+                    imageGenerator.appliesPreferredTrackTransform = true
+                    do {
+                        let cgImage = try imageGenerator.copyCGImage(at: CMTime(seconds: 0.5, preferredTimescale: 60), actualTime: nil)
+                        let thumbnailUIImage = UIImage(cgImage: cgImage)
+                        // Cache the thumbnail using the existing UIKit UIImage internally.
+                        ThumbnailCache.shared.setThumbnail(thumbnailUIImage, for: videoId)
+                        continuation.resume(returning: thumbnailUIImage)
+                    } catch {
+                        print("Error generating thumbnail: \(error.localizedDescription)")
+                        continuation.resume(returning: nil)
+                    }
+                } else {
+                    print("Failed to load preferredTransform: \(error?.localizedDescription ?? "unknown error")")
+                    continuation.resume(returning: nil)
                 }
-            } else {
-                print("Failed to load preferredTransform: \(error?.localizedDescription ?? "unknown error")")
-                completion(nil)
             }
         }
     }

@@ -26,7 +26,8 @@ class LikesService: ObservableObject {
             let documents = snapshot.documents
             self.likedVideos = documents.compactMap { doc -> LikedVideo? in
                 guard let likedTimestamp = doc.data()["liked_timestamp"] as? Timestamp else { return nil }
-                return LikedVideo(id: doc.documentID, timestamp: likedTimestamp.dateValue())
+                let prompt = doc.data()["prompt"] as? String
+                return LikedVideo(id: doc.documentID, timestamp: likedTimestamp.dateValue(), prompt: prompt)
             }
             
             self.initialLoadCompleted = true
@@ -47,7 +48,8 @@ class LikesService: ObservableObject {
                     
                     self.likedVideos = documents.compactMap { doc -> LikedVideo? in
                         guard let likedTimestamp = doc.data()["liked_timestamp"] as? Timestamp else { return nil }
-                        return LikedVideo(id: doc.documentID, timestamp: likedTimestamp.dateValue())
+                        let prompt = doc.data()["prompt"] as? String
+                        return LikedVideo(id: doc.documentID, timestamp: likedTimestamp.dateValue(), prompt: prompt)
                     }
                 }
         } catch {

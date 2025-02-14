@@ -6,12 +6,24 @@ struct PromptDistribution {
     let profileBasedCount: Int
     let explorationCount: Int
 
+    /// Get count for a specific prompt type
     subscript(type: PromptType) -> Int {
         switch type {
         case .mutation: return mutationCount
         case .crossover: return crossoverCount
         case .profileBased: return profileBasedCount
         case .exploration: return explorationCount
+        }
+    }
+
+    /// Get all prompt counts as a dictionary
+    var promptCount: [PromptType: Int] {
+        [
+            .mutation: mutationCount,
+            .crossover: crossoverCount,
+            .profileBased: profileBasedCount,
+            .exploration: explorationCount
+        ]
     }
 
     func distributeExcess(excessCount: Int, currentCounts: [PromptType: Int]) -> [PromptType: Int] {

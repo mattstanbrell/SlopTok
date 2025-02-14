@@ -39,7 +39,7 @@ actor VideoGenerator {
     func generateVideos(
         likedVideos: [LikedVideo], profile: UserProfile
     ) async throws -> [String] {
-        let distribution = PromptDistribution.calculateDistribution(likedCount: likedVideos.count, totalCount: TOTAL_PROMPT_COUNT)
+        let distribution = PromptDistribution.calculateDistribution(likedCount: likedVideos.count, totalCount: Self.TOTAL_PROMPT_COUNT)
         print("❤️ User liked \(likedVideos.count) videos")
         print("📊 Prompt distribution:")
         print("  - Mutations: \(distribution.mutationCount)")
@@ -68,7 +68,7 @@ actor VideoGenerator {
         )
         
         // If we still need more videos, retry with missing counts
-        if generatedVideoIDs.count < TOTAL_PROMPT_COUNT {
+        if generatedVideoIDs.count < Self.TOTAL_PROMPT_COUNT {
             var missingCounts: [PromptType: Int] = [:]
             for (type, desiredCount) in distribution.promptCount {
                 let currentCount = currentCounts[type] ?? 0
@@ -109,16 +109,16 @@ actor VideoGenerator {
                 group.addTask {
                     switch type {
                     case .mutation:
-                        let prompts = try await generateMutationPrompts(count: count, profile: profile, likedVideos: likedVideos)
+                        let prompts = try await self.generateMutationPrompts(count: count, profile: profile, likedVideos: likedVideos)
                         return (type, prompts)
                     case .crossover:
-                        let prompts = try await generateCrossoverPrompts(count: count, profile: profile, likedVideos: likedVideos)
+                        let prompts = try await self.generateCrossoverPrompts(count: count, profile: profile, likedVideos: likedVideos)
                         return (type, prompts)
                     case .profileBased:
-                        let prompts = try await generateProfileBasedPrompts(count: count, profile: profile)
+                        let prompts = try await self.generateProfileBasedPrompts(count: count, profile: profile)
                         return (type, prompts)
                     case .exploration:
-                        let prompts = try await generateRandomPrompts(count: count)
+                        let prompts = try await self.generateRandomPrompts(count: count)
                         return (type, prompts)
                     }
                 }
@@ -140,8 +140,8 @@ actor VideoGenerator {
             }
             
             // Use excess if needed
-            if generatedVideoIDs.count < TOTAL_PROMPT_COUNT && !excessPrompts.isEmpty {
-                let needed = TOTAL_PROMPT_COUNT - generatedVideoIDs.count
+            if generatedVideoIDs.count < Self.TOTAL_PROMPT_COUNT && !excessPrompts.isEmpty {
+                let needed = Self.TOTAL_PROMPT_COUNT - generatedVideoIDs.count
                 let additionalCounts = distribution.distributeExcess(excessCount: needed, currentCounts: currentCounts)
                 
                 for (type, count) in additionalCounts {
@@ -159,8 +159,9 @@ actor VideoGenerator {
         // Load thumbnails for liked videos
         var thumbnailImages: [(id: String, prompt: String, image: UIImage)] = []
         for video in likedVideos {
-            if let image = await VideoService.shared.getUIImageThumbnail(for: video.id) {
-                thumbnailImages.append((id: video.id, prompt: video.prompt, image: image))
+            if let image = await VideoService.shared.getUIImageThumbnail(for: video.id),
+               let prompt = video.prompt {  // Only include videos that have both an image and a prompt
+                thumbnailImages.append((id: video.id, prompt: prompt, image: image))
             }
         }
         
@@ -199,8 +200,9 @@ actor VideoGenerator {
         // Load thumbnails for liked videos
         var thumbnailImages: [(id: String, prompt: String, image: UIImage)] = []
         for video in likedVideos {
-            if let image = await VideoService.shared.getUIImageThumbnail(for: video.id) {
-                thumbnailImages.append((id: video.id, prompt: video.prompt, image: image))
+            if let image = await VideoService.shared.getUIImageThumbnail(for: video.id),
+               let prompt = video.prompt {  // Only include videos that have both an image and a prompt
+                thumbnailImages.append((id: video.id, prompt: prompt, image: image))
             }
         }
         
@@ -245,8 +247,8 @@ actor VideoGenerator {
             let result = await LLMService.shared.complete(
                 userPrompt: prompt,
                 systemPrompt: "You are generating creative photo prompts based on a user's interests and preferences. Focus on creating prompts that align with their interests while maintaining high visual quality and appeal.",
-                responseType: PromptGenerationResponse.self,
-                schema: PromptGenerationSchema.profileBasedSchema
+                responseType: PromptGenerationOpenAIResponse.self,
+                schema: PromptGenerationOpenAISchema.profileBasedSchema
             )
             
             switch result {
@@ -291,8 +293,8 @@ actor VideoGenerator {
             let result = await LLMService.shared.complete(
                 userPrompt: prompt,
                 systemPrompt: "You are generating creative, diverse photo prompts that explore unique subjects and styles. Focus on creating prompts that are visually striking and technically detailed.",
-                responseType: PromptGenerationResponse.self,
-                schema: PromptGenerationSchema.randomSchema
+                responseType: PromptGenerationOpenAIResponse.self,
+                schema: PromptGenerationOpenAISchema.randomSchema
             )
             
             switch result {
@@ -309,10 +311,6 @@ actor VideoGenerator {
                 throw error
             }
         }
-    }
-
-    private func generateVideo(prompt: String) async throws -> Video {
-        // TODO
     }
 
     // if something fails, retry. only return ids of successful stuff.
@@ -367,7 +365,7 @@ actor VideoGenerator {
                         print("✅ Task \(index + 1): Converted to video")
                         
                         // 3. Upload video and get ID
-                        let videoId = try await uploadVideo(at: videoURL, prompt: prompt)
+                        let videoId = try await self.uploadVideo(at: videoURL, prompt: prompt)
                         print("✅ Task \(index + 1): Uploaded video \(videoId)")
                         
                         return videoId

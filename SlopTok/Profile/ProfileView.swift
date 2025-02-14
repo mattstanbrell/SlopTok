@@ -64,22 +64,28 @@ struct ProfileView: View {
                 
                 // Tab content with page style using simplified GridView with defaults
                 TabView(selection: $selectedTab) {
-                    GridView(videos: likesService.likedVideos) { sortedVideos, selectedVideoId in
-                        LikedVideoPlayerView(
-                            likedVideos: sortedVideos,
-                            initialIndex: sortedVideos.firstIndex(where: { $0.id == selectedVideoId }) ?? 0,
-                            likesService: likesService
-                        )
-                    }
+                    GridView<LikedVideo, LikedVideoPlayerView>(
+                        videos: likesService.likedVideos,
+                        fullscreenContent: { sortedVideos, selectedVideoId in
+                            LikedVideoPlayerView(
+                                likedVideos: sortedVideos,
+                                initialIndex: sortedVideos.firstIndex(where: { $0.id == selectedVideoId }) ?? 0,
+                                likesService: likesService
+                            )
+                        }
+                    )
                     .tag(0)
                     
-                    GridView(videos: bookmarksService.bookmarkedVideos) { sortedVideos, selectedVideoId in
-                        BookmarkedVideoPlayerView(
-                            bookmarkedVideos: sortedVideos,
-                            initialIndex: sortedVideos.firstIndex(where: { $0.id == selectedVideoId }) ?? 0,
-                            bookmarksService: bookmarksService
-                        )
-                    }
+                    GridView<BookmarkedVideo, BookmarkedVideoPlayerView>(
+                        videos: bookmarksService.bookmarkedVideos,
+                        fullscreenContent: { sortedVideos, selectedVideoId in
+                            BookmarkedVideoPlayerView(
+                                bookmarkedVideos: sortedVideos,
+                                initialIndex: sortedVideos.firstIndex(where: { $0.id == selectedVideoId }) ?? 0,
+                                bookmarksService: bookmarksService
+                            )
+                        }
+                    )
                     .tag(1)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
@@ -312,14 +318,10 @@ struct ProfileView: View {
                     
                     // Get thumbnails for all videos
                     for (index, video) in recentVideos.enumerated() {
-                        await withCheckedContinuation { continuation in
-                            ThumbnailGenerator.getThumbnail(for: video.id) { image in
-                                if let _ = image {
-                                    let uiImage = ThumbnailCache.shared.getCachedUIImageThumbnail(for: video.id)
-                                    thumbnailImages.append(("Image \(index + 1)", uiImage))
-                                }
-                                continuation.resume()
-                            }
+                        // Get the thumbnail using the async version
+                        _ = await ThumbnailGenerator.getThumbnail(for: video.id)
+                        if let uiImage = ThumbnailCache.shared.getCachedUIImageThumbnail(for: video.id) {
+                            thumbnailImages.append(("Image \(index + 1)", uiImage))
                         }
                     }
                     

@@ -46,7 +46,6 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
-				"Prompt Generation/PromptDistribution.swift",
 			);
 			target = 6E327EDA2D5131C600E5EE3C /* SlopTok */;
 		};

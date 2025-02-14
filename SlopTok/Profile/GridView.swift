@@ -52,9 +52,10 @@ struct GridView<T: VideoModel, FullScreenView: View>: View {
 
     private func getThumbnail(for videoId: String) {
         if thumbnails[videoId] != nil { return }
-        ThumbnailGenerator.getThumbnail(for: videoId) { image in
-            if let image = image {
-                DispatchQueue.main.async {
+        
+        Task {
+            if let image = await ThumbnailGenerator.getThumbnail(for: videoId) {
+                await MainActor.run {
                     thumbnails[videoId] = image
                 }
             }
