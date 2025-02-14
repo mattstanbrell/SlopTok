@@ -115,27 +115,29 @@ class WatchCountCoordinator: ObservableObject {
         let generationStartTime = Timestamp(date: Date())
         var initialWatchCount = 0
         var generationSucceeded = false
+        var lastGeneration: Timestamp?
         
         // Get liked videos since last prompt generation
         do {
             print("🎬 Starting prompt generation process...")
             
             // Start a transaction to get the current state
-            let (lastGeneration, currentWatchCount) = try await db.runTransaction({ transaction, errorPointer -> (Timestamp?, Int) in
-                let countsRef = self.db.collection("users")
-                    .document(userId)
-                    .collection("watchCounts")
-                    .document("counts")
-                
-                let snapshot = try transaction.getDocument(countsRef)
-                let lastGen = snapshot.data()?["lastPromptGeneration"] as? Timestamp
-                let currentCount = snapshot.data()?["videosWatchedSinceLastPrompt"] as? Int ?? 0
-                
-                return (lastGen, currentCount)
+            _ = try await db.runTransaction({ transaction, errorPointer in
+                do {
+                    let countsRef = self.db.collection("users")
+                        .document(userId)
+                        .collection("watchCounts")
+                        .document("counts")
+                    
+                    let snapshot = try transaction.getDocument(countsRef)
+                    lastGeneration = snapshot.data()?["lastPromptGeneration"] as? Timestamp
+                    initialWatchCount = snapshot.data()?["videosWatchedSinceLastPrompt"] as? Int ?? 0
+                    return nil
+                } catch {
+                    errorPointer?.pointee = error as NSError
+                    return nil
+                }
             })
-            
-            // Store the initial count for later use in defer
-            initialWatchCount = currentCount
             
             print("📅 Last generation timestamp: \(lastGeneration?.dateValue().description ?? "nil")")
             
@@ -190,30 +192,34 @@ class WatchCountCoordinator: ObservableObject {
             // Ensure we account for videos watched during generation
             Task {
                 do {
-                    try await db.runTransaction({ transaction, errorPointer in
-                        let countsRef = self.db.collection("users")
-                            .document(userId)
-                            .collection("watchCounts")
-                            .document("counts")
-                        
-                        let snapshot = try transaction.getDocument(countsRef)
-                        let currentCount = snapshot.data()?["videosWatchedSinceLastPrompt"] as? Int ?? 0
-                        
-                        // Calculate how many videos were watched during generation
-                        let videosWatchedDuringGeneration = currentCount - initialWatchCount
-                        
-                        var updates: [String: Any] = [
-                            "videosWatchedSinceLastPrompt": videosWatchedDuringGeneration
-                        ]
-                        
-                        // Only update the timestamp if generation succeeded
-                        if generationSucceeded {
-                            updates["lastPromptGeneration"] = generationStartTime
+                    _ = try await db.runTransaction({ transaction, errorPointer in
+                        do {
+                            let countsRef = self.db.collection("users")
+                                .document(userId)
+                                .collection("watchCounts")
+                                .document("counts")
+                            
+                            let snapshot = try transaction.getDocument(countsRef)
+                            let currentCount = snapshot.data()?["videosWatchedSinceLastPrompt"] as? Int ?? 0
+                            
+                            // Calculate how many videos were watched during generation
+                            let videosWatchedDuringGeneration = currentCount - initialWatchCount
+                            
+                            var updates: [String: Any] = [
+                                "videosWatchedSinceLastPrompt": videosWatchedDuringGeneration
+                            ]
+                            
+                            // Only update the timestamp if generation succeeded
+                            if generationSucceeded {
+                                updates["lastPromptGeneration"] = generationStartTime
+                            }
+                            
+                            transaction.updateData(updates, forDocument: countsRef)
+                            return nil
+                        } catch {
+                            errorPointer?.pointee = error as NSError
+                            return nil
                         }
-                        
-                        transaction.updateData(updates, forDocument: countsRef)
-                        
-                        return nil
                     })
                     print("✅ Updated watch counts" + (generationSucceeded ? " and timestamp" : "") + " after generation attempt")
                 } catch {
