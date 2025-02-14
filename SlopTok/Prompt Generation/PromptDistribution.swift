@@ -46,7 +46,7 @@ struct PromptDistribution {
         return distribution
     }
 
-    func calculateDistribution(likedCount: Int, totalCount: Int) -> PromptDistribution {
+    static func calculateDistribution(likedCount: Int, totalCount: Int) -> PromptDistribution {
         switch likedCount {
             case 0:
                 return PromptDistribution(

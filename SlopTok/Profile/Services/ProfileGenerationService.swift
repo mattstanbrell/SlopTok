@@ -14,10 +14,7 @@ actor ProfileGenerationService {
         self.vertex = VertexAI.vertexAI()
         self.model = VertexAIService.createGeminiModel(
             modelName: "gemini-2.0-flash",
-            generationConfig: GenerationConfig(
-                responseMIMEType: "application/json",
-                responseSchema: ProfileGenerationGeminiSchema.schema
-            )
+            schema: ProfileGenerationGeminiSchema.schema
         )
     }
     

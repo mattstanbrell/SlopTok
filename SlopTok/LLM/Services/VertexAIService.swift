@@ -9,12 +9,12 @@ class VertexAIService {
     
     /// Creates a Gemini model with consistent safety settings
     /// - Parameters:
-    ///   - modelName: Name of the model to use (e.g. "gemini-2.0-flash")
-    ///   - generationConfig: Optional generation config for structured output
+    ///   - modelName: Name of the model to use (defaults to "gemini-2.0-flash")
+    ///   - schema: Optional JSON schema for structured output
     /// - Returns: Configured GenerativeModel instance
     static func createGeminiModel(
-        modelName: String,
-        generationConfig: GenerationConfig? = nil
+        modelName: String = "gemini-2.0-flash",
+        schema: Schema? = nil
     ) -> GenerativeModel {
         let safetySettings = [
             SafetySetting(harmCategory: .harassment, threshold: .blockOnlyHigh),
@@ -24,9 +24,16 @@ class VertexAIService {
             SafetySetting(harmCategory: .civicIntegrity, threshold: .blockOnlyHigh)
         ]
         
+        let config = schema.map { schema in
+            GenerationConfig(
+                responseMIMEType: "application/json",
+                responseSchema: schema
+            )
+        }
+        
         return VertexAI.vertexAI().generativeModel(
             modelName: modelName,
-            generationConfig: generationConfig,
+            generationConfig: config,
             safetySettings: safetySettings
         )
     }

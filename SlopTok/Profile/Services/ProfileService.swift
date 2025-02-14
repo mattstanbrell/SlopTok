@@ -68,16 +68,15 @@ class ProfileService: ObservableObject {
                 
                 // Generate initial prompts
                 if let profile = self.currentProfile {
-                    let promptResult = await PromptGenerationService.shared.generatePrompts(
-                        likedVideos: likedVideos,
-                        profile: profile
-                    )
-                    
-                    switch promptResult {
-                    case let .success((response, _)):
-                        print("✅ Generated \(response.prompts.count) initial prompts")
-                    case .failure(let error):
-                        print("❌ Error generating initial prompts: \(error.description)")
+                    print("✨ Generating initial videos...")
+                    do {
+                        let videoIds = try await VideoGenerator.shared.generateVideos(
+                            likedVideos: likedVideos.map { LikedVideo(id: $0.id, timestamp: Date(), prompt: $0.prompt) },
+                            profile: profile
+                        )
+                        print("✅ Generated \(videoIds.count) initial videos")
+                    } catch {
+                        print("❌ Error generating initial videos: \(error)")
                     }
                 }
                 

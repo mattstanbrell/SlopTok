@@ -130,15 +130,14 @@ class WatchCountCoordinator: ObservableObject {
             if !likedVideos.isEmpty {
                 print("👤 Fetching current profile...")
                 if let profile = await ProfileService.shared.currentProfile {
-                    print("✅ Got profile, generating prompts...")
-                    let promptResult = await PromptGenerationService.shared.generatePrompts(
-                        likedVideos: likedVideos,
-                        profile: profile
-                    )
-                    
-                    switch promptResult {
-                    case let .success((response, _)):
-                        print("🎉 Successfully generated \(response.prompts.count) new prompts")
+                    print("✅ Got profile, generating videos...")
+                    do {
+                        let videoIds = try await VideoGenerator.shared.generateVideos(
+                            likedVideos: likedVideos,
+                            profile: profile
+                        )
+                        print("🎉 Successfully generated \(videoIds.count) new videos")
+                        
                         // Reset counters and update timestamp only after successful generation
                         try await db.collection("users")
                             .document(userId)
@@ -149,8 +148,8 @@ class WatchCountCoordinator: ObservableObject {
                                 "lastPromptGeneration": FieldValue.serverTimestamp()
                             ])
                         print("✅ Reset watch counts and updated timestamp")
-                    case .failure(let error):
-                        print("❌ Error generating prompts: \(error.description)")
+                    } catch {
+                        print("❌ Error generating videos: \(error)")
                     }
                 } else {
                     print("❌ Failed to get current profile")
