@@ -6,6 +6,7 @@ struct ControlDotView: View {
     @State private var showProfile = false
     @State private var showComments = false
     @State private var isClosing = false
+    @State private var showFolderSelection = false
 
     let userName: String
     let dotColor: Color
@@ -62,6 +63,12 @@ struct ControlDotView: View {
         .sheet(isPresented: $showComments) {
             CommentsSheetView(videoId: currentVideoId)
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showFolderSelection) {
+            FolderSelectionView(
+                bookmarksService: bookmarksService,
+                videoId: currentVideoId
+            )
         }
     }
 
@@ -133,6 +140,14 @@ struct ControlDotView: View {
                     buttonIcon("bookmark", foregroundColor: color)
                         .padding(.trailing, 8)
                 }
+                .simultaneousGesture(
+                    LongPressGesture()
+                        .onEnded { _ in
+                            if !isClosing && bookmarksService.bookmarkFolders.count > 0 {
+                                showFolderSelection = true
+                            }
+                        }
+                )
                 .disabled(isClosing)
             }
         }
@@ -227,6 +242,85 @@ struct ControlDotView: View {
             } catch {
                 print("❌ Share - Error sharing video: \(error)")
             }
+        }
+    }
+}
+
+struct FolderSelectionView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var bookmarksService: BookmarksService
+    let videoId: String
+    @State private var selectedFolders: Set<String>
+    @State private var isUpdating = false
+    
+    init(bookmarksService: BookmarksService, videoId: String) {
+        self.bookmarksService = bookmarksService
+        self.videoId = videoId
+        
+        // Initialize selected folders based on current video's folders
+        let currentFolders = bookmarksService.getFolders(for: videoId)
+        _selectedFolders = State(initialValue: Set(currentFolders.map { $0.id }))
+    }
+    
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(bookmarksService.bookmarkFolders) { folder in
+                    HStack {
+                        Image(systemName: "folder.fill")
+                            .foregroundColor(.yellow)
+                        
+                        Text(folder.name)
+                        
+                        Spacer()
+                        
+                        if selectedFolders.contains(folder.id) {
+                            Image(systemName: "checkmark")
+                                .foregroundColor(.blue)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if selectedFolders.contains(folder.id) {
+                            selectedFolders.remove(folder.id)
+                        } else {
+                            selectedFolders.insert(folder.id)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Select Folders")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        updateFolders()
+                    }
+                    .disabled(isUpdating)
+                }
+            }
+        }
+    }
+    
+    private func updateFolders() {
+        isUpdating = true
+        Task {
+            do {
+                try await bookmarksService.addVideoToFolders(
+                    videoId: videoId,
+                    folderIds: Array(selectedFolders)
+                )
+                dismiss()
+            } catch {
+                print("Error updating folders: \(error)")
+            }
+            isUpdating = false
         }
     }
 }

@@ -5,59 +5,107 @@ extension String: Identifiable {
     public var id: String { self }
 }
 
-struct GridView<T: VideoModel, FullScreenView: View>: View {
+struct GridView<T: VideoModel, V: View>: View {
     let videos: [T]
-    let columns: [GridItem]
-    let gridSpacing: CGFloat
-    let gridPadding: CGFloat
-    let fullscreenContent: (_ sortedVideos: [T], _ selectedVideoId: String) -> FullScreenView
-
-    // Convenience initializer with default grid parameters
-    init(videos: [T],
-         gridColumns: [GridItem] = Array(repeating: GridItem(.flexible(), spacing: 1), count: 3),
-         gridSpacing: CGFloat = 1,
-         gridPadding: CGFloat = 0,
-         fullscreenContent: @escaping (_ sortedVideos: [T], _ selectedVideoId: String) -> FullScreenView) {
+    let fullscreenContent: ([T], String) -> V
+    @State private var selectedVideoId: String?
+    @State private var showCreateFolder = false
+    @State private var selectedFolder: BookmarkFolder?
+    let bookmarksService: BookmarksService?
+    
+    init(
+        videos: [T],
+        fullscreenContent: @escaping ([T], String) -> V,
+        bookmarksService: BookmarksService? = nil
+    ) {
         self.videos = videos
-        self.columns = gridColumns
-        self.gridSpacing = gridSpacing
-        self.gridPadding = gridPadding
         self.fullscreenContent = fullscreenContent
+        self.bookmarksService = bookmarksService
     }
-
-    @State private var thumbnails: [String: Image] = [:]
-    @State private var selectedVideoId: String? = nil
-
+    
     var body: some View {
-        let sortedVideos = videos.sorted { $0.timestamp > $1.timestamp }
-        
         ScrollView {
-            LazyVGrid(columns: columns, spacing: gridSpacing) {
-                ForEach(sortedVideos, id: \.id) { video in
-                    VideoThumbnail(videoId: video.id, thumbnail: thumbnails[video.id])
-                        .onAppear {
-                            getThumbnail(for: video.id)
+            VStack(alignment: .leading, spacing: 16) {
+                // Show folders section if this is a bookmarks grid
+                if let bookmarksService = bookmarksService {
+                    HStack {
+                        Text("Folders")
+                            .font(.headline)
+                        
+                        Spacer()
+                        
+                        Button {
+                            showCreateFolder = true
+                        } label: {
+                            Image(systemName: "folder.badge.plus")
+                                .foregroundColor(.primary)
                         }
-                        .onTapGesture {
-                            selectedVideoId = video.id
+                    }
+                    .padding(.horizontal)
+                    
+                    if !bookmarksService.bookmarkFolders.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(spacing: 16) {
+                                ForEach(bookmarksService.bookmarkFolders) { folder in
+                                    VStack {
+                                        ZStack {
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .fill(Color.gray.opacity(0.2))
+                                            
+                                            Image(systemName: "folder.fill")
+                                                .font(.system(size: 30))
+                                                .foregroundColor(.yellow)
+                                        }
+                                        .frame(width: 60, height: 60)
+                                        
+                                        Text(folder.name)
+                                            .font(.caption)
+                                            .lineLimit(1)
+                                    }
+                                    .frame(width: 80)
+                                    .onTapGesture {
+                                        selectedFolder = folder
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
                         }
+                    }
+                    
+                    if !videos.isEmpty {
+                        Text("All Bookmarks")
+                            .font(.headline)
+                            .padding(.horizontal)
+                    }
+                }
+                
+                // Videos grid
+                LazyVGrid(columns: [
+                    GridItem(.flexible(), spacing: 1),
+                    GridItem(.flexible(), spacing: 1),
+                    GridItem(.flexible(), spacing: 1)
+                ], spacing: 1) {
+                    ForEach(videos) { video in
+                        VideoThumbnailView(videoId: video.id)
+                            .aspectRatio(9/16, contentMode: .fill)
+                            .onTapGesture {
+                                selectedVideoId = video.id
+                            }
+                    }
                 }
             }
-            .padding(gridPadding)
         }
         .fullScreenCover(item: $selectedVideoId) { videoId in
-            fullscreenContent(sortedVideos, videoId)
+            fullscreenContent(videos, videoId)
         }
-    }
-
-    private func getThumbnail(for videoId: String) {
-        if thumbnails[videoId] != nil { return }
-        
-        Task {
-            if let image = await ThumbnailGenerator.getThumbnail(for: videoId) {
-                await MainActor.run {
-                    thumbnails[videoId] = image
-                }
+        .sheet(isPresented: $showCreateFolder) {
+            if let bookmarksService = bookmarksService {
+                CreateFolderView(bookmarksService: bookmarksService)
+            }
+        }
+        .sheet(item: $selectedFolder) { folder in
+            if let bookmarksService = bookmarksService {
+                FolderContentsView(bookmarksService: bookmarksService, folder: folder)
             }
         }
     }

@@ -20,7 +20,7 @@ class LikesService: ObservableObject {
             let snapshot = try await db.collection("users")
                 .document(userId)
                 .collection("videoInteractions")
-                .whereField("liked_timestamp", isGreaterThan: Timestamp(date: Date(timeIntervalSince1970: 0)))
+                .whereField("liked", isEqualTo: true)
                 .getDocuments()
             
             let documents = snapshot.documents
@@ -36,7 +36,7 @@ class LikesService: ObservableObject {
             db.collection("users")
                 .document(userId)
                 .collection("videoInteractions")
-                .whereField("liked_timestamp", isGreaterThan: Timestamp(date: Date(timeIntervalSince1970: 0)))
+                .whereField("liked", isEqualTo: true)
                 .addSnapshotListener { [weak self] querySnapshot, error in
                     guard let self = self,
                           let documents = querySnapshot?.documents else {

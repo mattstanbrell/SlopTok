@@ -37,7 +37,7 @@ class ProfileService: ObservableObject {
             let interactions = try await db.collection("users")
                 .document(userId)
                 .collection("videoInteractions")
-                .whereField("liked", isEqualTo: true)
+                .whereField("liked_timestamp", isGreaterThan: Timestamp(date: Date(timeIntervalSince1970: 0)))
                 .getDocuments()
             
             // Extract prompts from liked videos

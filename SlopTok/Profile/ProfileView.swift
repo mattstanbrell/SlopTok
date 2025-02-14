@@ -84,7 +84,8 @@ struct ProfileView: View {
                                 initialIndex: sortedVideos.firstIndex(where: { $0.id == selectedVideoId }) ?? 0,
                                 bookmarksService: bookmarksService
                             )
-                        }
+                        },
+                        bookmarksService: bookmarksService
                     )
                     .tag(1)
                 }
