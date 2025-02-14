@@ -12,8 +12,6 @@ struct FolderContentsView: View {
     @State private var isGenerating = false
     @State private var generatedVideoIds: [String] = []
     @State private var profileLoadError: String?
-    @State private var isSelectionMode = false
-    @State private var selectedVideos: Set<String> = []
     
     private var folderVideos: [BookmarkedVideo] {
         bookmarksService.bookmarkedVideos.filter { $0.folderIds.contains(folder.id) }
@@ -23,31 +21,6 @@ struct FolderContentsView: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 16) {
-                    if isSelectionMode {
-                        HStack {
-                            Button("Cancel") {
-                                isSelectionMode = false
-                                selectedVideos.removeAll()
-                            }
-                            .foregroundColor(.blue)
-                            
-                            Spacer()
-                            
-                            Button("Remove (\(selectedVideos.count))") {
-                                Task {
-                                    for videoId in selectedVideos {
-                                        try? await bookmarksService.removeVideoFromFolder(videoId: videoId, folderId: folder.id)
-                                    }
-                                    isSelectionMode = false
-                                    selectedVideos.removeAll()
-                                }
-                            }
-                            .foregroundColor(.red)
-                            .disabled(selectedVideos.isEmpty)
-                        }
-                        .padding(.horizontal)
-                    }
-                    
                     // Generate More button
                     Button {
                         generateMoreVideos()
@@ -84,28 +57,8 @@ struct FolderContentsView: View {
                         ForEach(folderVideos) { video in
                             VideoThumbnailView(videoId: video.id)
                                 .aspectRatio(9/16, contentMode: .fill)
-                                .overlay(
-                                    ZStack {
-                                        if isSelectionMode {
-                                            Color.black.opacity(selectedVideos.contains(video.id) ? 0.5 : 0.0)
-                                            if selectedVideos.contains(video.id) {
-                                                Image(systemName: "checkmark.circle.fill")
-                                                    .foregroundColor(.white)
-                                                    .font(.title)
-                                            }
-                                        }
-                                    }
-                                )
                                 .onTapGesture {
-                                    if isSelectionMode {
-                                        if selectedVideos.contains(video.id) {
-                                            selectedVideos.remove(video.id)
-                                        } else {
-                                            selectedVideos.insert(video.id)
-                                        }
-                                    } else {
-                                        selectedVideoId = video.id
-                                    }
+                                    selectedVideoId = video.id
                                 }
                                 .contextMenu {
                                     Button(role: .destructive) {
@@ -123,12 +76,6 @@ struct FolderContentsView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
-                        Button {
-                            isSelectionMode = true
-                        } label: {
-                            Label("Remove Videos", systemImage: "minus.circle")
-                        }
-                        
                         Button(role: .destructive) {
                             deleteFolder()
                         } label: {
@@ -183,7 +130,6 @@ struct FolderContentsView: View {
         guard !folderVideos.isEmpty else { return }
         isGenerating = true
         profileLoadError = nil
-        generatedVideoIds = []  // Reset the array
         
         Task {
             do {
@@ -214,23 +160,16 @@ struct FolderContentsView: View {
                         
                         print("📝 Found \(videosWithPrompts.count) videos with prompts out of \(folderVideos.count) total")
                         
-                        // Show the swiper immediately
-                        await MainActor.run {
-                            showingGeneratedVideos = true
-                        }
-                        
                         // Generate new videos using folder-specific generation
-                        for try await videoId in VideoGenerator.shared.generateFolderVideosStream(
+                        let videoIds = try await VideoGenerator.shared.generateFolderVideos(
                             likedVideos: videosWithPrompts,
                             profile: profile
-                        ) {
-                            await MainActor.run {
-                                self.generatedVideoIds.append(videoId)
-                            }
-                        }
+                        )
                         
                         await MainActor.run {
+                            self.generatedVideoIds = videoIds
                             self.isGenerating = false
+                            self.showingGeneratedVideos = true
                         }
                         return
                     } else {
@@ -268,7 +207,6 @@ struct VideoSwiperView: View {
     @State private var isAnimatingTransition = false
     @State private var lastPreloadedIndex = -1  // Track last preload index
     @State private var isDismissing = false  // Add this state variable
-    @State private var isVisible = false  // Add this state variable
     
     private var currentVideoId: String? {
         guard currentIndex < generatedVideoIds.count else { return nil }
@@ -295,7 +233,7 @@ struct VideoSwiperView: View {
         
         print("🔄 Preloading videos from index \(index) to \(maxIndex)")
         
-        // Update player cache position for current video
+        // Update player cache position but don't clear old players
         if let currentId = currentVideoId {
             PlayerCache.shared.updatePosition(current: currentId)
         }
@@ -303,33 +241,39 @@ struct VideoSwiperView: View {
         // Preload next videos
         for i in (index + 1)...maxIndex {
             let videoId = generatedVideoIds[i]
-            // Skip if already preloaded
-            if PlayerCache.shared.hasPlayer(for: videoId) { continue }
             
-            // Start loading the video immediately
+            // Skip if already preloaded
+            if PlayerCache.shared.hasPlayer(for: videoId) {
+                continue
+            }
+            
+            // Ensure thumbnail is loaded first
+            Task {
+                _ = await VideoService.shared.getUIImageThumbnail(for: videoId)
+            }
+            
             VideoURLCache.shared.getVideoURL(for: videoId) { url in
                 if let url = url {
                     VideoFileCache.shared.getLocalVideoURL(for: videoId, remoteURL: url) { localURL in
                         if let localURL = localURL {
                             print("✅ Preloaded video: \(videoId)")
+                            let player = AVPlayer(url: localURL)
                             
-                            Task { @MainActor in
-                                let player = AVPlayer(url: localURL)
-                                player.automaticallyWaitsToMinimizeStalling = false
-                                player.currentItem?.preferredForwardBufferDuration = 2
-                                
-                                // Add to cache immediately
-                                PlayerCache.shared.setPlayer(player, for: videoId)
-                                
-                                // Wait for player to be ready
-                                for _ in 0..<50 { // Try for 5 seconds
-                                    if player.status == .readyToPlay {
-                                        player.preroll(atRate: 1) { _ in
-                                            print("🎮 Player prerolled for video: \(videoId)")
-                                        }
-                                        break
-                                    }
-                                    try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
+                            // Configure for optimal playback
+                            player.automaticallyWaitsToMinimizeStalling = false
+                            
+                            // Start loading the video immediately
+                            player.replaceCurrentItem(with: AVPlayerItem(url: localURL))
+                            player.seek(to: .zero)
+                            
+                            // Store the player first
+                            PlayerCache.shared.setPlayer(player, for: videoId)
+                            
+                            // Add to rate observer to detect when ready
+                            _ = player.observe(\.timeControlStatus) { player, _ in
+                                if player.timeControlStatus == .waitingToPlayAtSpecifiedRate {
+                                    // Video is buffered and ready
+                                    print("🎥 Video ready to play: \(videoId)")
                                 }
                             }
                         }
@@ -342,11 +286,9 @@ struct VideoSwiperView: View {
     var body: some View {
         ZStack {
             // Background color with fade animation
-            Color.black
-                .opacity(isDismissing ? 0 : (isVisible ? 0.6 : 0))
+            Color.black.opacity(isDismissing ? 0 : 0.6)
                 .ignoresSafeArea()
-                .animation(.easeInOut(duration: 0.2), value: isDismissing)
-                .animation(.easeInOut(duration: 0.2), value: isVisible)
+                .animation(.easeOut(duration: 0.2), value: isDismissing)
             
             // Stack of cards
             ZStack {
@@ -366,11 +308,16 @@ struct VideoSwiperView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 20))
                     .scaleEffect(0.95)
                     .padding(.top, 60)
-                    .opacity(0.7)
+                    .opacity(isAnimatingTransition ? 1 : 0.7)  // Make opaque during transition
+                    .animation(.easeOut(duration: 0.2), value: isAnimatingTransition)
                     .onAppear {
                         print("🎴 Rendering next card: \(nextId)")
-                        // Ensure video is preloaded
-                        preloadNextVideos(from: currentIndex)
+                        // Ensure next video is ready to play
+                        if let player = PlayerCache.shared.getPlayer(for: nextId) {
+                            player.seek(to: .zero)
+                            // Don't start playing, just ensure it's buffered
+                            player.pause()
+                        }
                     }
                 }
                 
@@ -391,20 +338,19 @@ struct VideoSwiperView: View {
                     .offset(x: offset)
                     .rotationEffect(.degrees(Double(offset) / 20))
                     .padding(.top, 60)
-                    .opacity(isDismissing ? 0 : 1)
+                    .opacity(isDismissing || isAnimatingTransition ? 0 : 1)
                     .animation(.easeOut(duration: 0.2), value: isDismissing)
                     .onAppear {
                         print("🎴 Rendering current card: \(videoId)")
-                        // Reset animation state when new card appears
-                        isAnimatingTransition = false
-                        // Ensure next videos are preloaded
-                        preloadNextVideos(from: currentIndex)
+                        // Start playing current video
+                        if let player = PlayerCache.shared.getPlayer(for: videoId) {
+                            player.seek(to: .zero)
+                            player.play()
+                        }
                     }
-                    .allowsHitTesting(!isAnimatingTransition)  // Only disable hit testing during animation
                     .gesture(
                         DragGesture()
                             .onChanged { gesture in
-                                guard !isAnimatingTransition else { return }  // Ignore gestures during animation
                                 print("👆 Drag changed: \(gesture.translation.width)")
                                 isSwiping = true
                                 withAnimation(.interactiveSpring()) {
@@ -412,7 +358,6 @@ struct VideoSwiperView: View {
                                 }
                             }
                             .onEnded { gesture in
-                                guard !isAnimatingTransition else { return }  // Ignore gestures during animation
                                 print("👆 Drag ended: \(gesture.translation.width)")
                                 let width = UIScreen.main.bounds.width
                                 if abs(offset) > width * 0.4 {
@@ -438,10 +383,9 @@ struct VideoSwiperView: View {
                                     print("⏰ Scheduling index update")
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                                         print("📱 Updating index from \(currentIndex) to \(currentIndex + 1)")
-                                        withAnimation(nil) {  // Disable animation for state updates
-                                            currentIndex += 1
-                                            offset = 0
-                                        }
+                                        currentIndex += 1
+                                        offset = 0
+                                        isAnimatingTransition = false
                                         print("🔄 Reset offset to 0")
                                         if currentIndex >= generatedVideoIds.count {
                                             print("🏁 No more videos, dismissing")
@@ -462,7 +406,6 @@ struct VideoSwiperView: View {
                             }
                     )
                     .onTapGesture(count: 2) {
-                        guard !isAnimatingTransition else { return }  // Ignore taps during animation
                         print("👆 Double tap detected")
                         // Double tap to like
                         print("📁 Adding to folder: \(videoId)")
@@ -480,10 +423,9 @@ struct VideoSwiperView: View {
                         print("⏰ Scheduling index update")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             print("📱 Updating index from \(currentIndex) to \(currentIndex + 1)")
-                            withAnimation(nil) {  // Disable animation for state updates
-                                currentIndex += 1
-                                offset = 0
-                            }
+                            currentIndex += 1
+                            offset = 0
+                            isAnimatingTransition = false
                             print("🔄 Reset offset to 0")
                             if currentIndex >= generatedVideoIds.count {
                                 print("🏁 No more videos, dismissing")
@@ -494,7 +436,10 @@ struct VideoSwiperView: View {
                             }
                         }
                     }
-                } else {
+                }
+                
+                // No more videos text - only show when truly at the end
+                if currentIndex >= generatedVideoIds.count {
                     Text("No more videos")
                         .foregroundColor(.secondary)
                         .padding(.top, 60)
@@ -506,12 +451,7 @@ struct VideoSwiperView: View {
                 print("🔄 Current index changed to: \(newIndex)")
                 print("📊 Total videos: \(generatedVideoIds.count)")
                 
-                // Clear player cache when index changes to force thumbnail reload
-                if let oldId = currentVideoId {
-                    PlayerCache.shared.removePlayer(for: oldId)
-                }
-                
-                // Preload next videos when current index changes
+                // Don't clear the cache, just preload next videos
                 preloadNextVideos(from: newIndex)
             }
             
@@ -529,18 +469,13 @@ struct VideoSwiperView: View {
             }
             .font(.system(size: 50))
             .padding(40)
-            .padding(.top, 60)  // Move down from top
+            .padding(.top, 60)
         }
         .presentationBackground(.clear)
         .onAppear {
             print("🎬 VideoSwiperView appeared")
             print("📊 Total videos: \(generatedVideoIds.count)")
             print("🎯 Starting index: \(currentIndex)")
-            
-            // Animate background in after a brief delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                isVisible = true
-            }
             
             // Start preloading from the first video
             preloadNextVideos(from: currentIndex)
