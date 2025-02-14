@@ -558,4 +558,119 @@ actor VideoGenerator {
 
         return generatedVideoIDs
     }
+    
+    func generateFolderVideosStream(
+        likedVideos: [LikedVideo],
+        profile: UserProfile
+    ) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    // Use the standard distribution calculation but override profile-based and exploration
+                    let baseDistribution = PromptDistribution.calculateDistribution(
+                        likedCount: likedVideos.count,
+                        totalCount: Self.TOTAL_PROMPT_COUNT
+                    )
+                    
+                    // For folders, we want to focus only on mutations and crossovers
+                    let extraCount = baseDistribution.profileBasedCount + baseDistribution.explorationCount
+                    
+                    // If we have fewer than 2 videos, we can't do crossovers
+                    let distribution: PromptDistribution
+                    if likedVideos.count < 2 {
+                        distribution = PromptDistribution(
+                            mutationCount: baseDistribution.mutationCount + extraCount,  // All extra goes to mutations
+                            crossoverCount: 0,  // No crossovers possible
+                            profileBasedCount: 0,
+                            explorationCount: 0
+                        )
+                    } else {
+                        distribution = PromptDistribution(
+                            mutationCount: baseDistribution.mutationCount + Int(Double(extraCount) * 0.7),
+                            crossoverCount: baseDistribution.crossoverCount + Int(Double(extraCount) * 0.3),
+                            profileBasedCount: 0,
+                            explorationCount: 0
+                        )
+                    }
+                    
+                    print("❤️ Folder has \(likedVideos.count) videos")
+                    print("📊 Folder prompt distribution:")
+                    print("  - Mutations: \(distribution.mutationCount)")
+                    print("  - Crossovers: \(distribution.crossoverCount)")
+                    
+                    // Generate prompts first
+                    var allPrompts: [Prompt] = []
+                    
+                    if distribution.mutationCount > 0 {
+                        let mutationPrompts = try await generateMutationPrompts(
+                            count: distribution.mutationCount,
+                            profile: profile,
+                            likedVideos: likedVideos
+                        )
+                        allPrompts.append(contentsOf: mutationPrompts)
+                    }
+                    
+                    if distribution.crossoverCount > 0 {
+                        let crossoverPrompts = try await generateCrossoverPrompts(
+                            count: distribution.crossoverCount,
+                            profile: profile,
+                            likedVideos: likedVideos
+                        )
+                        allPrompts.append(contentsOf: crossoverPrompts)
+                    }
+                    
+                    // Process each prompt individually and yield results as they complete
+                    for prompt in allPrompts {
+                        if let videoId = try await generateAndUploadVideo(prompt: prompt) {
+                            continuation.yield(videoId)
+                        }
+                    }
+                    
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+    
+    private func generateAndUploadVideo(prompt: Prompt) async throws -> String? {
+        // Create unique temp directory
+        let taskTempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: taskTempDir) }
+        
+        do {
+            // Create temp directory
+            try FileManager.default.createDirectory(at: taskTempDir, withIntermediateDirectories: true)
+            
+            // 1. Generate image
+            let imageData = try await ImageGenerationService.shared.generateImage(
+                modelName: Self.IMAGE_MODEL,
+                prompt: prompt.prompt
+            )
+            print("✅ Generated image for prompt")
+            
+            // 2. Convert to video
+            guard let image = UIImage(data: imageData) else {
+                throw LLMError.apiError("Failed to create UIImage from data")
+            }
+            
+            let videoURL = try await ImageToVideoConverter.convertImageToVideo(
+                image: image,
+                duration: 3.0,
+                size: CGSize(width: 1080, height: 1920)
+            )
+            print("✅ Converted to video")
+            
+            // 3. Upload video and get ID
+            let videoId = try await uploadVideo(at: videoURL, prompt: prompt)
+            print("✅ Uploaded video \(videoId)")
+            
+            return videoId
+        } catch {
+            print("❌ Failed to generate/upload video: \(error.localizedDescription)")
+            return nil
+        }
+    }
 }
