@@ -281,6 +281,16 @@ struct ProfileView: View {
                     batch.deleteDocument(doc.reference)
                 }
                 
+                // Clear bookmark folders collection
+                let bookmarkFoldersSnapshot = try await db.collection("users")
+                    .document(userId)
+                    .collection("bookmarkFolders")
+                    .getDocuments()
+                
+                for doc in bookmarkFoldersSnapshot.documents {
+                    batch.deleteDocument(doc.reference)
+                }
+                
                 // Commit all Firestore changes
                 try await batch.commit()
                 

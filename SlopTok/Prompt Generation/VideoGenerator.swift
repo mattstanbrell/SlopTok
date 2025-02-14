@@ -5,7 +5,7 @@ import UIKit
 
 actor VideoGenerator {
     /// Total number of prompts to generate
-    private static let TOTAL_PROMPT_COUNT = 20
+    private static let TOTAL_PROMPT_COUNT = 4
     
     /// Number of times to retry failed operations
     private static let NUM_RETRIES = 5
@@ -99,7 +99,8 @@ actor VideoGenerator {
         generatedVideoIDs: inout [String],
         distribution: PromptDistribution,
         profile: UserProfile,
-        likedVideos: [LikedVideo]
+        likedVideos: [LikedVideo],
+        skipAddToFeed: Bool = false
     ) async throws {
         var excessPrompts: [PromptType: [Prompt]] = [:]
         
@@ -134,7 +135,7 @@ actor VideoGenerator {
                     
                 excessPrompts[promptType] = excess
                 
-                let videoIDs = try await generateAndUploadAndPushVideos(prompts: toGenerate)
+                let videoIDs = try await generateAndUploadAndPushVideos(prompts: toGenerate, skipAddToFeed: skipAddToFeed)
                 currentCounts[promptType] = (currentCounts[promptType] ?? 0) + videoIDs.count
                 generatedVideoIDs.append(contentsOf: videoIDs)
             }
@@ -147,7 +148,7 @@ actor VideoGenerator {
                 for (type, count) in additionalCounts {
                     if let typeExcess = excessPrompts[type] {
                         let prompts = Array(typeExcess.prefix(count))
-                        let videoIDs = try await generateAndUploadAndPushVideos(prompts: prompts)
+                        let videoIDs = try await generateAndUploadAndPushVideos(prompts: prompts, skipAddToFeed: skipAddToFeed)
                         generatedVideoIDs.append(contentsOf: videoIDs)
                     }
                 }
@@ -172,6 +173,13 @@ actor VideoGenerator {
             profile: profile,
             likedVideosWithThumbnails: thumbnailImages
         )
+        
+        print("🔍 Mutation Prompt:")
+        print("Base Parts:")
+        for (index, part) in parts.enumerated() {
+            print("  Part \(index + 1): \(part)")
+        }
+        print("Main Prompt: \(prompt)")
         
         return try await RetryHelper.retry(numRetries: Self.NUM_RETRIES, operation: "mutation prompts") {
             let response = try await mutationModel.generateContent(parts + [prompt as PartsRepresentable])
@@ -214,6 +222,13 @@ actor VideoGenerator {
             likedVideosWithThumbnails: thumbnailImages
         )
         
+        print("🔍 Crossover Prompt:")
+        print("Base Parts:")
+        for (index, part) in parts.enumerated() {
+            print("  Part \(index + 1): \(part)")
+        }
+        print("Main Prompt: \(prompt)")
+        
         return try await RetryHelper.retry(numRetries: Self.NUM_RETRIES, operation: "crossover prompts") {
             let response = try await crossoverModel.generateContent(parts + [prompt as PartsRepresentable])
             
@@ -242,6 +257,9 @@ actor VideoGenerator {
             count: count,
             profile: profile
         )
+        
+        print("🔍 Profile-Based Prompt:")
+        print(prompt)
         
         return try await RetryHelper.retry(numRetries: Self.NUM_RETRIES, operation: "profile-based prompts") {
             let result = await LLMService.shared.complete(
@@ -289,6 +307,9 @@ actor VideoGenerator {
         Do not include any parentIds in the response.
         """
         
+        print("🔍 Random Prompt:")
+        print(prompt)
+        
         return try await RetryHelper.retry(numRetries: Self.NUM_RETRIES, operation: "random prompts") {
             let result = await LLMService.shared.complete(
                 userPrompt: prompt,
@@ -314,7 +335,7 @@ actor VideoGenerator {
     }
 
     // if something fails, retry. only return ids of successful stuff.
-    private func generateAndUploadAndPushVideos(prompts: [Prompt]) async throws -> [String] {
+    private func generateAndUploadAndPushVideos(prompts: [Prompt], skipAddToFeed: Bool = false) async throws -> [String] {
         // Track successful and failed operations
         var completedVideoIds: [String] = []
         var failedPrompts: [(prompt: Prompt, error: Error)] = []
@@ -385,25 +406,28 @@ actor VideoGenerator {
                     await MainActor.run {
                         completedVideoIds.append(videoId)
                         
-                        // Add to feed in batches
-                        if completedVideoIds.count <= 5 {
-                            // First 5 videos added individually
-                            VideoService.shared.appendVideo(videoId)
-                        } else if completedVideoIds.count % 5 == 0 {
-                            // After first 5, add in batches of 5
-                            let startIndex = completedVideoIds.count - 5
-                            let batch = Array(completedVideoIds[startIndex..<completedVideoIds.count])
-                            for id in batch {
-                                VideoService.shared.appendVideo(id)
+                        // Only add to feed if not skipped
+                        if !skipAddToFeed {
+                            // Add to feed in batches
+                            if completedVideoIds.count <= 5 {
+                                // First 5 videos added individually
+                                VideoService.shared.appendVideo(videoId)
+                            } else if completedVideoIds.count % 5 == 0 {
+                                // After first 5, add in batches of 5
+                                let startIndex = completedVideoIds.count - 5
+                                let batch = Array(completedVideoIds[startIndex..<completedVideoIds.count])
+                                for id in batch {
+                                    VideoService.shared.appendVideo(id)
+                                }
                             }
                         }
                     }
                 }
             }
             
-            // Add any remaining videos to feed
+            // Add any remaining videos to feed if not skipped
             await MainActor.run {
-                if completedVideoIds.count > 5 {
+                if !skipAddToFeed && completedVideoIds.count > 5 {
                     let remainingCount = (completedVideoIds.count - 5) % 5
                     if remainingCount > 0 {
                         let startIndex = completedVideoIds.count - remainingCount
@@ -447,5 +471,91 @@ actor VideoGenerator {
         _ = try await videoRef.getMetadata()
         
         return videoId
+    }
+
+    func generateFolderVideos(
+        likedVideos: [LikedVideo],
+        profile: UserProfile
+    ) async throws -> [String] {
+        // Use the standard distribution calculation but override profile-based and exploration
+        let baseDistribution = PromptDistribution.calculateDistribution(
+            likedCount: likedVideos.count,
+            totalCount: Self.TOTAL_PROMPT_COUNT
+        )
+        
+        // For folders, we want to focus only on mutations and crossovers
+        // Redistribute the profile-based and exploration counts to mutations and crossovers
+        let extraCount = baseDistribution.profileBasedCount + baseDistribution.explorationCount
+        
+        // If we have fewer than 2 videos, we can't do crossovers
+        let distribution: PromptDistribution
+        if likedVideos.count < 2 {
+            distribution = PromptDistribution(
+                mutationCount: baseDistribution.mutationCount + extraCount,  // All extra goes to mutations
+                crossoverCount: 0,  // No crossovers possible
+                profileBasedCount: 0,  // No profile-based generation for folders
+                explorationCount: 0    // No random exploration for folders
+            )
+        } else {
+            distribution = PromptDistribution(
+                mutationCount: baseDistribution.mutationCount + Int(Double(extraCount) * 0.7),  // 70% to mutations
+                crossoverCount: baseDistribution.crossoverCount + Int(Double(extraCount) * 0.3),  // 30% to crossovers
+                profileBasedCount: 0,  // No profile-based generation for folders
+                explorationCount: 0    // No random exploration for folders
+            )
+        }
+        
+        print("❤️ Folder has \(likedVideos.count) videos")
+        print("📊 Folder prompt distribution:")
+        print("  - Mutations: \(distribution.mutationCount)")
+        print("  - Crossovers: \(distribution.crossoverCount)")
+        print("  - Profile-based: \(distribution.profileBasedCount)")
+        print("  - Exploration: \(distribution.explorationCount)")
+
+        var generatedVideoIDs: [String] = []
+        var currentCounts: [PromptType: Int] = [:]
+        
+        // Initial generation
+        let initialCounts: [PromptType: Int] = [
+            .mutation: distribution.mutationCount,
+            .crossover: distribution.crossoverCount,
+            .profileBased: distribution.profileBasedCount,
+            .exploration: distribution.explorationCount
+        ]
+        
+        try await generateAndProcessPrompts(
+            targetCounts: initialCounts,
+            currentCounts: &currentCounts,
+            generatedVideoIDs: &generatedVideoIDs,
+            distribution: distribution,  // Use our folder-specific distribution
+            profile: profile,
+            likedVideos: likedVideos,
+            skipAddToFeed: true  // Skip adding to feed for folder generation
+        )
+        
+        // If we still need more videos, retry with missing counts
+        if generatedVideoIDs.count < Self.TOTAL_PROMPT_COUNT {
+            var missingCounts: [PromptType: Int] = [:]
+            for (type, desiredCount) in distribution.promptCount {  // Use our folder-specific distribution
+                let currentCount = currentCounts[type] ?? 0
+                if currentCount < desiredCount {
+                    missingCounts[type] = desiredCount - currentCount
+                }
+            }
+            
+            if !missingCounts.isEmpty {
+                try await generateAndProcessPrompts(
+                    targetCounts: missingCounts,
+                    currentCounts: &currentCounts,
+                    generatedVideoIDs: &generatedVideoIDs,
+                    distribution: distribution,  // Use our folder-specific distribution
+                    profile: profile,
+                    likedVideos: likedVideos,
+                    skipAddToFeed: true  // Skip adding to feed for folder generation
+                )
+            }
+        }
+
+        return generatedVideoIDs
     }
 }
