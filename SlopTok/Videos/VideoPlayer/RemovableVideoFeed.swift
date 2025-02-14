@@ -86,45 +86,47 @@ struct RemovableVideoFeed<T: VideoIdentifiable>: View {
     
     private var videoPlayerView: some View {
         ZStack(alignment: .bottom) {
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(videos) { video in
-                            ZStack {
-                                buildVideoCell(video, video.index == currentIndex, {
-                                    handleRemove(video)
-                                })
-                                
-                                if isDotExpanded {
-                                    Color.clear
-                                        .contentShape(Rectangle())
-                                        .onTapGesture {
-                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                                isDotExpanded = false
-                                            }
+            ScrollView(.vertical, showsIndicators: false) {
+                LazyVStack(spacing: 0) {
+                    ForEach(videos) { video in
+                        ZStack {
+                            buildVideoCell(video, video.index == currentIndex, {
+                                handleRemove(video)
+                            })
+                            
+                            if isDotExpanded {
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                            isDotExpanded = false
                                         }
-                                }
+                                    }
                             }
-                            .id(video.id)
                         }
-                    }
-                    .scrollTargetLayout()
-                }
-                .scrollTargetBehavior(.paging)
-                .ignoresSafeArea()
-                .onAppear {
-                    if currentIndex < videos.count {
-                        proxy.scrollTo(videos[currentIndex].id, anchor: .center)
+                        .frame(width: UIScreen.main.bounds.width,
+                               height: UIScreen.main.bounds.height)
+                        .clipped()
+                        .id(video.index)
                     }
                 }
-                .onChange(of: currentIndex) { newIndex in
-                    if newIndex < videos.count {
-                        withAnimation {
-                            proxy.scrollTo(videos[newIndex].id, anchor: .center)
-                        }
-                    }
-                }
+                .scrollTargetLayout()
             }
+            .scrollTargetBehavior(.paging)
+            .ignoresSafeArea()
+            .scrollPosition(id: .init(
+                get: { currentIndex },
+                set: { newIndex in
+                    if let index = newIndex {
+                        currentIndex = index
+                        if isDotExpanded {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                isDotExpanded = false
+                            }
+                        }
+                    }
+                }
+            ))
             
             buildControlDot()
                 .padding(.bottom, 20)

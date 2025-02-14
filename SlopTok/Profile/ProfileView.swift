@@ -90,6 +90,8 @@ struct ProfileView: View {
                     .tag(1)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
+                .ignoresSafeArea(.container, edges: .bottom)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)

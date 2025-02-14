@@ -95,6 +95,7 @@ struct GridView<T: VideoModel, V: View>: View {
                 }
             }
         }
+        .ignoresSafeArea(.container, edges: .bottom)
         .fullScreenCover(item: $selectedVideoId) { videoId in
             fullscreenContent(videos, videoId)
         }
