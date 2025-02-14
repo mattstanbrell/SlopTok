@@ -17,6 +17,9 @@ class WatchCountCoordinator: ObservableObject {
     /// TODO change back to 50
     private let profileUpdateThreshold = 25
     
+    /// Flag to track if prompt generation is in progress
+    private var isGeneratingPrompts = false
+    
     private init() {}
     
     /// Ensures watch counts document exists and starts monitoring
@@ -99,17 +102,41 @@ class WatchCountCoordinator: ObservableObject {
     
     /// Triggers generation of new prompts after threshold is reached
     private func triggerPromptGeneration(userId: String) async {
+        // Prevent concurrent generations
+        guard !isGeneratingPrompts else {
+            print("⏳ Prompt generation already in progress, skipping...")
+            return
+        }
+        
+        // Set flag before starting
+        isGeneratingPrompts = true
+        
+        // Record the generation start time before any Firebase calls
+        let generationStartTime = Timestamp(date: Date())
+        var initialWatchCount = 0
+        var generationSucceeded = false
+        
         // Get liked videos since last prompt generation
         do {
             print("🎬 Starting prompt generation process...")
             
-            // Get liked videos since last prompt generation
-            let lastGeneration = try await db.collection("users")
-                .document(userId)
-                .collection("watchCounts")
-                .document("counts")
-                .getDocument()
-                .data()?["lastPromptGeneration"] as? Timestamp
+            // Start a transaction to get the current state
+            let (lastGeneration, currentWatchCount) = try await db.runTransaction({ transaction, errorPointer -> (Timestamp?, Int) in
+                let countsRef = self.db.collection("users")
+                    .document(userId)
+                    .collection("watchCounts")
+                    .document("counts")
+                
+                let snapshot = try transaction.getDocument(countsRef)
+                let lastGen = snapshot.data()?["lastPromptGeneration"] as? Timestamp
+                let currentCount = snapshot.data()?["videosWatchedSinceLastPrompt"] as? Int ?? 0
+                
+                return (lastGen, currentCount)
+            })
+            
+            // Store the initial count for later use in defer
+            initialWatchCount = currentCount
+            
             print("📅 Last generation timestamp: \(lastGeneration?.dateValue().description ?? "nil")")
             
             let interactions = try await db.collection("users")
@@ -138,38 +165,61 @@ class WatchCountCoordinator: ObservableObject {
                             profile: profile
                         )
                         print("🎉 Successfully generated \(videoIds.count) new videos")
-                        
-                        // Reset counters and update timestamp only after successful generation
-                        try await db.collection("users")
-                            .document(userId)
-                            .collection("watchCounts")
-                            .document("counts")
-                            .updateData([
-                                "videosWatchedSinceLastPrompt": 0,
-                                "lastPromptGeneration": FieldValue.serverTimestamp()
-                            ])
-                        print("✅ Reset watch counts and updated timestamp")
+                        generationSucceeded = true
                     } catch {
                         print("❌ Error generating videos: \(error)")
+                        throw error  // Re-throw to ensure we handle this in the outer catch
                     }
                 } else {
                     print("❌ Failed to get current profile")
+                    throw NSError(domain: "WatchCountCoordinator", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to get current profile"])
                 }
             } else {
-                print("⚠️ No liked videos found since last generation, skipping prompt generation")
-                // Still reset the counter to prevent getting stuck
-                try await db.collection("users")
-                    .document(userId)
-                    .collection("watchCounts")
-                    .document("counts")
-                    .updateData([
-                        "videosWatchedSinceLastPrompt": 0,
-                        "lastPromptGeneration": FieldValue.serverTimestamp()
-                    ])
-                print("✅ Reset watch counts and updated timestamp")
+                print("⚠️ No liked videos found since last generation")
+                // If no videos to process, consider it a success so we update the timestamp
+                generationSucceeded = true
             }
         } catch {
             print("❌ Error during prompt generation: \(error)")
+        }
+        
+        // Always update the counters, but only update timestamp on success
+        defer {
+            isGeneratingPrompts = false
+            
+            // Ensure we account for videos watched during generation
+            Task {
+                do {
+                    try await db.runTransaction({ transaction, errorPointer in
+                        let countsRef = self.db.collection("users")
+                            .document(userId)
+                            .collection("watchCounts")
+                            .document("counts")
+                        
+                        let snapshot = try transaction.getDocument(countsRef)
+                        let currentCount = snapshot.data()?["videosWatchedSinceLastPrompt"] as? Int ?? 0
+                        
+                        // Calculate how many videos were watched during generation
+                        let videosWatchedDuringGeneration = currentCount - initialWatchCount
+                        
+                        var updates: [String: Any] = [
+                            "videosWatchedSinceLastPrompt": videosWatchedDuringGeneration
+                        ]
+                        
+                        // Only update the timestamp if generation succeeded
+                        if generationSucceeded {
+                            updates["lastPromptGeneration"] = generationStartTime
+                        }
+                        
+                        transaction.updateData(updates, forDocument: countsRef)
+                        
+                        return nil
+                    })
+                    print("✅ Updated watch counts" + (generationSucceeded ? " and timestamp" : "") + " after generation attempt")
+                } catch {
+                    print("❌ Error updating watch counts after generation: \(error)")
+                }
+            }
         }
     }
     
