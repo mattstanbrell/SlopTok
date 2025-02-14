@@ -31,10 +31,11 @@ class PlayerCache {
     
     // Track cached video IDs since NSCache doesn't provide enumeration
     private var cachedVideoIds: Set<String> = []
+    private let maxPlayers = 10
     
     private init() {
-        cache.countLimit = 10  // More than enough for our 4 videos
-        logger.info("PlayerCache initialized with limit of 10 players")
+        cache.countLimit = self.maxPlayers
+        logger.info("PlayerCache initialized with limit of \(self.maxPlayers) players")
     }
     
     func updatePosition(current: String) {
@@ -76,6 +77,19 @@ class PlayerCache {
     func setPlayer(_ player: AVPlayer, for videoId: String) {
         logger.info("➕ [AVPlayer Cache] Creating new player for video: \(videoId)")
         let cachedPlayer = CachedPlayer(player: player, videoId: videoId)
+        
+        // If we're at capacity, remove oldest non-current/previous player
+        if cachedVideoIds.count >= maxPlayers {
+            let candidatesForRemoval = cachedVideoIds.filter { id in
+                id != currentVideoId && id != previousVideoId
+            }
+            
+            if let oldestId = candidatesForRemoval.first {
+                removePlayer(for: oldestId)
+                logger.info("🗑️ [AVPlayer Cache] Removed oldest player for video: \(oldestId)")
+            }
+        }
+        
         cache.setObject(cachedPlayer, forKey: videoId as NSString)
         cachedVideoIds.insert(videoId)
         
@@ -84,8 +98,14 @@ class PlayerCache {
     }
     
     func removePlayer(for videoId: String) {
-        // No-op - we keep all players in cache since we have plenty of space
-        logger.info("ℹ️ [AVPlayer Cache] Keeping player in cache for video: \(videoId)")
+        // Only remove if it's not the current or previous video
+        if videoId != currentVideoId && videoId != previousVideoId {
+            cache.removeObject(forKey: videoId as NSString)
+            cachedVideoIds.remove(videoId)
+            logger.info("🗑️ [AVPlayer Cache] Removed player for video: \(videoId)")
+        } else {
+            logger.info("ℹ️ [AVPlayer Cache] Keeping player in cache for current/previous video: \(videoId)")
+        }
     }
     
     func getCachedVideoIds() -> [String] {
