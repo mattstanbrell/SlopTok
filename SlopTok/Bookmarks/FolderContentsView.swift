@@ -4,6 +4,7 @@ struct FolderContentsView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var bookmarksService: BookmarksService
     let folder: BookmarkFolder
+    @State private var selectedVideoId: String?
     
     private var folderVideos: [BookmarkedVideo] {
         bookmarksService.bookmarkedVideos.filter { $0.folderIds.contains(folder.id) }
@@ -20,6 +21,9 @@ struct FolderContentsView: View {
                     ForEach(folderVideos) { video in
                         VideoThumbnailView(videoId: video.id)
                             .aspectRatio(9/16, contentMode: .fill)
+                            .onTapGesture {
+                                selectedVideoId = video.id
+                            }
                             .contextMenu {
                                 Button(role: .destructive) {
                                     removeFromFolder(videoId: video.id)
@@ -45,6 +49,13 @@ struct FolderContentsView: View {
                     }
                 }
             }
+        }
+        .fullScreenCover(item: $selectedVideoId) { videoId in
+            BookmarkedVideoPlayerView(
+                bookmarkedVideos: folderVideos,
+                initialIndex: folderVideos.firstIndex(where: { $0.id == videoId }) ?? 0,
+                bookmarksService: bookmarksService
+            )
         }
     }
     

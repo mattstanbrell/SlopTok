@@ -20,7 +20,8 @@ class LikesService: ObservableObject {
             let snapshot = try await db.collection("users")
                 .document(userId)
                 .collection("videoInteractions")
-                .whereField("liked", isEqualTo: true)
+                .whereField("liked_timestamp", isGreaterThan: Timestamp(date: Date(timeIntervalSince1970: 0)))
+                .order(by: "liked_timestamp", descending: true)
                 .getDocuments()
             
             let documents = snapshot.documents
@@ -36,7 +37,8 @@ class LikesService: ObservableObject {
             db.collection("users")
                 .document(userId)
                 .collection("videoInteractions")
-                .whereField("liked", isEqualTo: true)
+                .whereField("liked_timestamp", isGreaterThan: Timestamp(date: Date(timeIntervalSince1970: 0)))
+                .order(by: "liked_timestamp", descending: true)
                 .addSnapshotListener { [weak self] querySnapshot, error in
                     guard let self = self,
                           let documents = querySnapshot?.documents else {
@@ -65,15 +67,13 @@ class LikesService: ObservableObject {
             .document(videoId)
         
         if isLiked(videoId: videoId) {
-            // Unlike - remove liked status and timestamp
+            // Unlike - remove timestamp
             interactionRef.updateData([
-                "liked": false,
                 "liked_timestamp": FieldValue.delete()
             ])
         } else {
-            // Like - set liked status and timestamp
+            // Like - set timestamp
             interactionRef.setData([
-                "liked": true,
                 "liked_timestamp": FieldValue.serverTimestamp()
             ], merge: true)
         }

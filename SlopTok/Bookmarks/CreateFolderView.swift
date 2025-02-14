@@ -6,63 +6,83 @@ struct CreateFolderView: View {
     @State private var folderName = ""
     @State private var selectedVideos: Set<String> = []
     @State private var isCreating = false
-    
+
     var body: some View {
         NavigationView {
             VStack(spacing: 16) {
                 // Folder name input
-                TextField("Folder Name", text: $folderName)
+                TextField("Enter folder name", text: $folderName)
                     .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 22))
+                    .frame(height: 50)
                     .padding(.horizontal)
                 
                 // Video grid
                 ScrollView {
-                    LazyVGrid(columns: [
-                        GridItem(.flexible(), spacing: 1),
-                        GridItem(.flexible(), spacing: 1),
-                        GridItem(.flexible(), spacing: 1)
-                    ], spacing: 1) {
-                        ForEach(bookmarksService.bookmarkedVideos) { video in
-                            VideoThumbnailView(videoId: video.id)
-                                .aspectRatio(9/16, contentMode: .fill)
-                                .overlay(
-                                    ZStack {
-                                        Color.black.opacity(selectedVideos.contains(video.id) ? 0.5 : 0.0)
+                    if bookmarksService.bookmarkedVideos.isEmpty {
+                        VStack(spacing: 12) {
+                            Text("No bookmarks yet")
+                                .font(.title2)
+                                .foregroundColor(.secondary)
+                            Text("Bookmarked items will appear here")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.vertical, 40)
+                    } else {
+                        LazyVGrid(columns: [
+                            GridItem(.flexible(), spacing: 1),
+                            GridItem(.flexible(), spacing: 1),
+                            GridItem(.flexible(), spacing: 1)
+                        ], spacing: 1) {
+                            ForEach(bookmarksService.bookmarkedVideos) { video in
+                                VideoThumbnailView(videoId: video.id)
+                                    .aspectRatio(9/16, contentMode: .fill)
+                                    .overlay(
+                                        ZStack {
+                                            Color.black.opacity(selectedVideos.contains(video.id) ? 0.5 : 0.0)
+                                            if selectedVideos.contains(video.id) {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .foregroundColor(.white)
+                                                    .font(.title)
+                                            }
+                                        }
+                                    )
+                                    .onTapGesture {
                                         if selectedVideos.contains(video.id) {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .foregroundColor(.white)
-                                                .font(.title)
+                                            selectedVideos.remove(video.id)
+                                        } else {
+                                            selectedVideos.insert(video.id)
                                         }
                                     }
-                                )
-                                .onTapGesture {
-                                    if selectedVideos.contains(video.id) {
-                                        selectedVideos.remove(video.id)
-                                    } else {
-                                        selectedVideos.insert(video.id)
-                                    }
-                                }
+                            }
                         }
                     }
                 }
             }
+            .padding(.top, 20)
             .navigationTitle("New Folder")
             .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled()
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Cancel") {
                         dismiss()
                     }
+                    .foregroundColor(.red.opacity(0.6))
                 }
-                
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Create") {
                         createFolder()
                     }
-                    .disabled(folderName.isEmpty || selectedVideos.isEmpty || isCreating)
+                    .disabled(folderName.isEmpty || isCreating)
                 }
             }
+            .background(.ultraThinMaterial)
         }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
     }
     
     private func createFolder() {
@@ -81,35 +101,3 @@ struct CreateFolderView: View {
         }
     }
 }
-
-// struct VideoThumbnailView: View {
-//     let videoId: String
-//     @State private var thumbnail: UIImage?
-    
-//     var body: some View {
-//         Group {
-//             if let thumbnail = thumbnail {
-//                 Image(uiImage: thumbnail)
-//                     .resizable()
-//                     .aspectRatio(contentMode: .fill)
-//                     .frame(maxWidth: .infinity)
-//                     .frame(height: UIScreen.main.bounds.width / 3 * 1.4)
-//                     .clipped()
-//             } else {
-//                 Rectangle()
-//                     .fill(Color.gray.opacity(0.3))
-//                     .frame(maxWidth: .infinity)
-//                     .frame(height: UIScreen.main.bounds.width / 3 * 1.4)
-//             }
-//         }
-//         .background(Color.black)
-//         .task {
-//             if let cached = ThumbnailCache.shared.getCachedUIImageThumbnail(for: videoId) {
-//                 self.thumbnail = cached
-//             } else {
-//                 // Generate thumbnail using ThumbnailGenerator
-//                 self.thumbnail = await ThumbnailGenerator.getThumbnailUIImage(for: videoId)
-//             }
-//         }
-//     }
-// } 
