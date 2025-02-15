@@ -9,6 +9,7 @@ struct ProfileView: View {
     let userName: String
     @ObservedObject var likesService: LikesService
     @StateObject private var bookmarksService = BookmarksService()
+    @StateObject private var userVideoService = UserVideoService.shared
     @StateObject private var videoService = VideoService.shared
     @State private var selectedTab = 0
     @State private var isSeeding = false
@@ -43,14 +44,14 @@ struct ProfileView: View {
                 
                 // Custom tab header
                 HStack(spacing: 0) {
-                    ForEach(["Likes", "Bookmarks"].indices, id: \.self) { index in
+                    ForEach(["Likes", "Bookmarks", "Videos"].indices, id: \.self) { index in
                         Button(action: {
                             withAnimation {
                                 selectedTab = index
                             }
                         }) {
                             VStack(spacing: 8) {
-                                Text(["Likes", "Bookmarks"][index])
+                                Text(["Likes", "Bookmarks", "Videos"][index])
                                     .foregroundColor(selectedTab == index ? .primary : .secondary)
                                     .font(.system(size: 16, weight: .semibold))
                             }
@@ -88,6 +89,17 @@ struct ProfileView: View {
                         bookmarksService: bookmarksService
                     )
                     .tag(1)
+                    
+                    GridView<UserVideo, UserVideoPlayerView>(
+                        videos: userVideoService.userVideos,
+                        fullscreenContent: { sortedVideos, selectedVideoId in
+                            UserVideoPlayerView(
+                                userVideos: sortedVideos,
+                                initialIndex: sortedVideos.firstIndex(where: { $0.id == selectedVideoId }) ?? 0
+                            )
+                        }
+                    )
+                    .tag(2)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .ignoresSafeArea(.container, edges: .bottom)
@@ -147,6 +159,7 @@ struct ProfileView: View {
         }
         .task {
             await bookmarksService.loadBookmarkedVideos()
+            await userVideoService.loadUserVideos()
         }
         .presentationBackground(.thinMaterial)
         .sheet(isPresented: $showingAnalysis) {

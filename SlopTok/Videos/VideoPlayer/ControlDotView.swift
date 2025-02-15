@@ -7,6 +7,7 @@ struct ControlDotView: View {
     @State private var showComments = false
     @State private var isClosing = false
     @State private var showFolderSelection = false
+    @State private var showVideoGeneration = false
 
     let userName: String
     let dotColor: Color
@@ -60,9 +61,12 @@ struct ControlDotView: View {
             ProfileView(userName: userName, likesService: likesService)
                 .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $showComments) {
-            CommentsSheetView(videoId: currentVideoId)
-                .presentationDragIndicator(.visible)
+        .sheet(isPresented: $showVideoGeneration) {
+            VideoGenerationView(
+                videoId: currentVideoId,
+                likesService: likesService,
+                bookmarksService: bookmarksService
+            )
         }
         .sheet(isPresented: $showFolderSelection) {
             FolderSelectionView(
@@ -95,15 +99,15 @@ struct ControlDotView: View {
 
                 Spacer()
 
-                // -- Comments Button --
+                // -- Video Generation Button --
                 Button {
                     if !isClosing {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            showComments = true
+                            showVideoGeneration = true
                         }
                     }
                 } label: {
-                    buttonIcon("bubble.left")
+                    buttonIcon("video.badge.plus")
                 }
                 .disabled(isClosing)
 
