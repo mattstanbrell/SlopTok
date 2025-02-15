@@ -40,11 +40,12 @@ class VideoPlayerViewModel: ObservableObject {
         }
     }
     
-    func setupPlayer() {
+    func setupPlayer(completion: (() -> Void)? = nil) {
         if player == nil {
             // First check if we have a preloaded player
             if let preloadedPlayer = PlayerCache.shared.getPlayer(for: videoResource) {
                 self.player = preloadedPlayer
+                completion?()
                 return
             }
             
@@ -57,9 +58,12 @@ class VideoPlayerViewModel: ObservableObject {
                     DispatchQueue.main.async {
                         self.createPlayer(with: localURL)
                         PlayerCache.shared.setPlayer(self.player!, for: self.videoResource)
+                        completion?()
                     }
                 }
             }
+        } else {
+            completion?()
         }
     }
     

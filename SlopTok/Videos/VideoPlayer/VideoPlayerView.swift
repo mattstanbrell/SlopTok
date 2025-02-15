@@ -50,7 +50,9 @@ struct VideoPlayerView: View {
                 .animation(.easeOut(duration: 0.2), value: viewModel.heartColor)
         }
         .onAppear {
-            viewModel.setupPlayer()
+            viewModel.setupPlayer {
+                viewModel.updatePlayback(isActive: true)
+            }
         }
         .background(
             GeometryReader { geometry in
