@@ -90,7 +90,7 @@ class ProfileService: ObservableObject {
     }
     
     /// Stores a profile in Firestore
-    private func storeProfile(_ profile: UserProfile) async throws {
+    func storeProfile(_ profile: UserProfile) async throws {
         guard let userId = Auth.auth().currentUser?.uid else { return }
         
         // Batch write for consistency

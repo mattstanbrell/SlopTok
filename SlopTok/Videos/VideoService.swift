@@ -46,8 +46,8 @@ class VideoService: ObservableObject {
                 return String(fullPath.dropLast(4)) // Remove .mp4
             }.sorted() // Sort seed videos alphabetically
             
-            // Load generated videos
-            let generatedRef = storage.reference().child("videos/generated")
+            // Load generated videos from user-specific path
+            let generatedRef = storage.reference().child("videos/generated/\(userId)")
             let generatedResult = try await generatedRef.listAll()
             let generatedVideoIds = generatedResult.items.map { item -> String in
                 let fullPath = item.name
@@ -108,7 +108,11 @@ class VideoService: ObservableObject {
         if seedVideos.contains(videoId) {
             return "videos/seed/\(videoId).mp4"
         }
-        return "videos/generated/\(videoId).mp4"
+        // For generated videos, use the user-specific path
+        guard let userId = Auth.auth().currentUser?.uid else {
+            return "videos/generated/\(videoId).mp4" // Fallback to legacy path
+        }
+        return "videos/generated/\(userId)/\(videoId).mp4"
     }
     
     /// Gets a UIImage thumbnail for a video

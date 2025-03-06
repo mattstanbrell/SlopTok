@@ -6,6 +6,14 @@ import FirebaseFirestore
 import FirebaseVertexAI
 
 struct ProfileView: View {
+    // Define counter class here at the type level
+    private class Counters {
+        var success = 0
+        var failure = 0
+        var processed = 0
+        var skipped = 0
+    }
+    
     let userName: String
     @ObservedObject var likesService: LikesService
     @StateObject private var bookmarksService = BookmarksService()
@@ -18,6 +26,9 @@ struct ProfileView: View {
     @State private var analysisResult: String?
     @State private var showingAnalysis = false
     @Environment(\.dismiss) private var dismiss
+    @State private var isDuplicating = false
+    @State private var isCopying = false
+    @State private var isUpdatingMetadata = false
     
     private var userPhotoURL: URL? {
         Auth.auth().currentUser?.photoURL
@@ -145,6 +156,42 @@ struct ProfileView: View {
                             }
                         }
                         .disabled(isAnalyzing)
+
+                        Button(action: deduplicateInterests) {
+                            if isDuplicating {
+                                ProgressView()
+                                    .tint(.purple)
+                            } else {
+                                Image(systemName: "arrow.triangle.merge")
+                                    .foregroundColor(.purple.opacity(0.6))
+                                    .font(.system(size: 17, weight: .semibold))
+                            }
+                        }
+                        .disabled(isDuplicating)
+                        
+                        Button(action: copyGeneratedVideos) {
+                            if isCopying {
+                                ProgressView()
+                                    .tint(.orange)
+                            } else {
+                                Image(systemName: "doc.on.doc.fill")
+                                    .foregroundColor(.orange.opacity(0.6))
+                                    .font(.system(size: 17, weight: .semibold))
+                            }
+                        }
+                        .disabled(isCopying)
+                        
+                        Button(action: updateCopiedVideosMetadata) {
+                            if isUpdatingMetadata {
+                                ProgressView()
+                                    .tint(.cyan)
+                            } else {
+                                Image(systemName: "tag.fill")
+                                    .foregroundColor(.cyan.opacity(0.6))
+                                    .font(.system(size: 17, weight: .semibold))
+                            }
+                        }
+                        .disabled(isUpdatingMetadata)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -379,6 +426,334 @@ struct ProfileView: View {
                 showingAnalysis = true
             }
             isAnalyzing = false
+        }
+    }
+    
+    private func deduplicateInterests() {
+        Task {
+            isDuplicating = true
+            defer { isDuplicating = false }
+            
+            guard let profile = await ProfileService.shared.currentProfile else {
+                return
+            }
+            
+            guard let userId = Auth.auth().currentUser?.uid else {
+                print("❌ Error deduplicating: User not authenticated")
+                return
+            }
+            
+            // Log the number of interests before cleanup
+            print("📊 Before deduplication: \(profile.interests.count) interests")
+            
+            // Create a dictionary to store unique interests by topic
+            var uniqueInterests: [String: Interest] = [:]
+            
+            // Process each interest
+            for interest in profile.interests {
+                if let existing = uniqueInterests[interest.topic] {
+                    // Merge examples and take the higher weight
+                    var merged = Interest(topic: interest.topic, examples: Array(Set(existing.examples + interest.examples)))
+                    merged.weight = max(existing.weight, interest.weight)
+                    uniqueInterests[interest.topic] = merged
+                } else {
+                    uniqueInterests[interest.topic] = interest
+                }
+            }
+            
+            // Create new profile with deduplicated interests
+            let newProfile = UserProfile(
+                interests: Array(uniqueInterests.values),
+                description: profile.description
+            )
+            
+            // Log the number of interests after cleanup
+            print("🧹 After deduplication: \(uniqueInterests.count) interests")
+            
+            // Store the updated profile
+            do {
+                let db = Firestore.firestore()
+                
+                // First, delete all existing interests
+                print("🗑️ Deleting all existing interests...")
+                let interestsSnapshot = try await db.collection("users")
+                    .document(userId)
+                    .collection("interests")
+                    .getDocuments()
+                
+                // Create a batch to delete all existing interests
+                let deleteBatch = db.batch()
+                for doc in interestsSnapshot.documents {
+                    deleteBatch.deleteDocument(doc.reference)
+                }
+                
+                // Commit the delete batch
+                try await deleteBatch.commit()
+                print("✅ Deleted all existing interests")
+                
+                // Now store the new deduplicated profile
+                try await ProfileService.shared.storeProfile(newProfile)
+                print("✅ Successfully deduplicated interests")
+            } catch {
+                print("❌ Error deduplicating interests: \(error)")
+            }
+        }
+    }
+    
+    private func copyGeneratedVideos() {
+        isCopying = true
+        let storage = Storage.storage()
+        let generatedRef = storage.reference().child("videos/generated")
+        let targetFolderRef = storage.reference().child("videos/generated/FRsSuRVvSDNDJeLiiWao57W2jjl1")
+            
+        // List all files in the generated videos folder
+        generatedRef.listAll { result, error in
+            if let error = error {
+                print("❌ Error listing files: \(error)")
+                self.isCopying = false
+                return
+            }
+            
+            guard let result = result else {
+                print("❌ Error: Result is nil")
+                self.isCopying = false
+                return
+            }
+            
+            print("🔍 Found \(result.items.count) videos to copy")
+            
+            // Use the class defined at the type level
+            let counters = Counters()
+            
+            // If no files to process, we're done
+            if result.items.isEmpty {
+                print("🎉 No files to copy")
+                self.isCopying = false
+                return
+            }
+            
+            // Function to check if we're done processing
+            let checkIfDone = {
+                if counters.processed >= result.items.count {
+                    print("🎉 Copy operation completed: \(counters.success) successful, \(counters.failure) failed")
+                    self.isCopying = false
+                }
+            }
+            
+            // Process each file
+            for (index, item) in result.items.enumerated() {
+                if !item.name.hasSuffix(".mp4") {
+                    print("⏭️ Skipping non-MP4 file: \(item.name)")
+                    counters.processed += 1
+                    checkIfDone()
+                    continue
+                }
+                
+                let targetRef = targetFolderRef.child(item.name)
+                
+                // First, get metadata so we can include it in the upload
+                item.getMetadata { metadata, metadataError in
+                    if let metadataError = metadataError {
+                        print("⚠️ Failed to get metadata for \(item.name): \(metadataError)")
+                        // Continue without metadata
+                        self.downloadAndUploadFile(item: item, targetRef: targetRef, index: index, totalCount: result.items.count, metadata: nil, counters: counters, checkIfDone: checkIfDone)
+                        return
+                    }
+                    
+                    // Download and upload with metadata included
+                    self.downloadAndUploadFile(item: item, targetRef: targetRef, index: index, totalCount: result.items.count, metadata: metadata, counters: counters, checkIfDone: checkIfDone)
+                }
+            }
+        }
+    }
+    
+    // Helper method to download and upload a file with optional metadata
+    private func downloadAndUploadFile(
+        item: StorageReference,
+        targetRef: StorageReference,
+        index: Int,
+        totalCount: Int,
+        metadata: StorageMetadata?,
+        counters: AnyObject,
+        checkIfDone: @escaping () -> Void
+    ) {
+        guard let counters = counters as? Counters else { return }
+        
+        // Download the file data
+        item.getData(maxSize: 50 * 1024 * 1024) { data, error in
+            if let error = error {
+                print("❌ Failed to download \(item.name): \(error)")
+                counters.failure += 1
+                counters.processed += 1
+                checkIfDone()
+                return
+            }
+            
+            guard let data = data else {
+                print("❌ Failed to download \(item.name): Data is nil")
+                counters.failure += 1
+                counters.processed += 1
+                checkIfDone()
+                return
+            }
+            
+            // Upload the data to the target location with metadata included
+            targetRef.putData(data, metadata: metadata) { _, uploadError in
+                if let uploadError = uploadError {
+                    print("❌ Failed to upload \(item.name): \(uploadError)")
+                    counters.failure += 1
+                } else {
+                    counters.success += 1
+                    print("✅ Copied file \(index+1)/\(totalCount): \(item.name)\(metadata == nil ? " (without metadata)" : "")")
+                }
+                
+                counters.processed += 1
+                checkIfDone()
+            }
+        }
+    }
+    
+    // Function to update only the metadata for already copied videos
+    private func updateCopiedVideosMetadata() {
+        isUpdatingMetadata = true
+        let storage = Storage.storage()
+        let generatedRef = storage.reference().child("videos/generated")
+        let targetFolderRef = storage.reference().child("videos/generated/FRsSuRVvSDNDJeLiiWao57W2jjl1")
+            
+        // List all files in the source folder
+        generatedRef.listAll { result, error in
+            if let error = error {
+                print("❌ Error listing source files: \(error)")
+                self.isUpdatingMetadata = false
+                return
+            }
+            
+            guard let result = result else {
+                print("❌ Error: Source result is nil")
+                self.isUpdatingMetadata = false
+                return
+            }
+            
+            // List all files in the target folder
+            targetFolderRef.listAll { targetResult, targetError in
+                if let targetError = targetError {
+                    print("❌ Error listing target files: \(targetError)")
+                    self.isUpdatingMetadata = false
+                    return
+                }
+                
+                guard let targetResult = targetResult else {
+                    print("❌ Error: Target result is nil")
+                    self.isUpdatingMetadata = false
+                    return
+                }
+                
+                // Convert target files to a dictionary for quick lookup
+                let targetFiles = Dictionary(uniqueKeysWithValues: targetResult.items.map { ($0.name, $0) })
+                
+                print("🔍 Found \(result.items.count) source videos and \(targetFiles.count) target videos")
+                
+                // Use the class defined at the type level 
+                let counters = Counters()
+                
+                // Function to check if we're done processing
+                let checkIfDone = {
+                    if counters.processed >= result.items.count {
+                        print("🎉 Metadata update completed: \(counters.success) successful, \(counters.failure) failed, \(counters.skipped) skipped")
+                        self.isUpdatingMetadata = false
+                    }
+                }
+                
+                // If no files to process, we're done
+                if result.items.isEmpty {
+                    print("🎉 No files to process")
+                    self.isUpdatingMetadata = false
+                    return
+                }
+                
+                // Process each source file
+                for (index, item) in result.items.enumerated() {
+                    if !item.name.hasSuffix(".mp4") {
+                        print("⏭️ Skipping non-MP4 file: \(item.name)")
+                        counters.processed += 1
+                        counters.skipped += 1
+                        checkIfDone()
+                        continue
+                    }
+                    
+                    // Find target file
+                    guard let targetRef = targetFiles[item.name] else {
+                        print("⏭️ Skipping \(item.name) - not found in target folder")
+                        counters.processed += 1
+                        counters.skipped += 1
+                        checkIfDone()
+                        continue
+                    }
+                    
+                    // Get source metadata
+                    item.getMetadata { metadata, metadataError in
+                        if let metadataError = metadataError {
+                            print("⚠️ Failed to get metadata for \(item.name): \(metadataError)")
+                            counters.failure += 1
+                            counters.processed += 1
+                            checkIfDone()
+                            return
+                        }
+                        
+                        guard let metadata = metadata else {
+                            print("⚠️ No metadata found for \(item.name)")
+                            counters.failure += 1
+                            counters.processed += 1
+                            checkIfDone()
+                            return
+                        }
+                        
+                        // Log metadata contents
+                        print("📋 Source metadata for \(item.name):")
+                        if let customMetadata = metadata.customMetadata, !customMetadata.isEmpty {
+                            for (key, value) in customMetadata {
+                                print("    - \(key): \(value.prefix(50))...")
+                            }
+                        } else {
+                            print("    - No custom metadata found")
+                        }
+                        
+                        // Create a new metadata object instead of trying to update the existing one
+                        let newMetadata = StorageMetadata()
+                        newMetadata.customMetadata = metadata.customMetadata
+                        
+                        // Update target metadata with the new metadata object
+                        targetRef.updateMetadata(newMetadata) { updatedMetadata, updateError in
+                            if let updateError = updateError {
+                                print("❌ Failed to update metadata for \(item.name): \(updateError)")
+                                counters.failure += 1
+                            } else {
+                                counters.success += 1
+                                print("✅ Updated metadata for file \(index+1)/\(result.items.count): \(item.name)")
+                                
+                                // Verify metadata was actually updated by getting it again
+                                targetRef.getMetadata { verifiedMetadata, verifyError in
+                                    if let verifyError = verifyError {
+                                        print("⚠️ Couldn't verify metadata for \(item.name): \(verifyError)")
+                                    } else if let verifiedMetadata = verifiedMetadata {
+                                        print("🔍 Verified target metadata for \(item.name):")
+                                        if let customMetadata = verifiedMetadata.customMetadata, !customMetadata.isEmpty {
+                                            for (key, value) in customMetadata {
+                                                print("    - \(key): \(value.prefix(50))...")
+                                            }
+                                        } else {
+                                            print("    - No custom metadata found after update")
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            counters.processed += 1
+                            checkIfDone()
+                        }
+                    }
+                }
+            }
         }
     }
 }

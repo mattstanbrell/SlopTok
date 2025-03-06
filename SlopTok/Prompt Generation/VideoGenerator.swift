@@ -2,6 +2,7 @@ import Foundation
 import FirebaseVertexAI
 import FirebaseStorage
 import UIKit
+import FirebaseAuth
 
 actor VideoGenerator {
     /// Total number of prompts to generate
@@ -456,8 +457,13 @@ actor VideoGenerator {
         let random = String((0..<4).map { _ in randomChars.randomElement()! })
         let videoId = "\(timestamp)\(random)"
         
+        guard let userId = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
         let storage = Storage.storage()
-        let videoRef = storage.reference().child("videos/generated/\(videoId).mp4")
+        // Use the new user-specific path
+        let videoRef = storage.reference().child("videos/generated/\(userId)/\(videoId).mp4")
         
         let metadata = StorageMetadata()
         metadata.contentType = "video/mp4"

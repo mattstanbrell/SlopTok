@@ -1,6 +1,7 @@
 import Foundation
 import FirebaseStorage
 import os
+import FirebaseAuth
 
 // Helper class to wrap cached video URL with the time it was fetched.
 class CachedVideoURL: NSObject {
@@ -61,8 +62,14 @@ class VideoURLCache {
                 completion(url)
             } else {
                 // If not found in seed, try generated videos
-                self?.logger.info("🔄 Seed video not found, trying generated video path for \(videoResource)")
-                let generatedRef = storage.reference(withPath: "videos/generated/\(videoResource).mp4")
+                guard let userId = Auth.auth().currentUser?.uid else {
+                    self?.logger.error("❌ No authenticated user")
+                    completion(nil)
+                    return
+                }
+                
+                self?.logger.info("🔄 Seed video not found, trying user-specific generated video path for \(videoResource)")
+                let generatedRef = storage.reference(withPath: "videos/generated/\(userId)/\(videoResource).mp4")
                 generatedRef.downloadURL { [weak self] url, error in
                     if let error = error {
                         self?.logger.error("❌ Error getting download URL for \(videoResource): \(error.localizedDescription)")

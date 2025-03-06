@@ -130,6 +130,7 @@ struct FolderContentsView: View {
         guard !folderVideos.isEmpty else { return }
         isGenerating = true
         profileLoadError = nil
+        print("🎬 Starting video generation for folder: \(folder.name)")
         
         Task {
             do {
@@ -139,6 +140,8 @@ struct FolderContentsView: View {
                         // Get prompts from video interactions
                         let db = Firestore.firestore()
                         guard let userId = Auth.auth().currentUser?.uid else { return }
+                        
+                        print("👤 Got user profile, fetching video interactions")
                         
                         // Get all video interactions in a single query
                         let querySnapshot = try await db.collection("users")
@@ -161,30 +164,36 @@ struct FolderContentsView: View {
                         print("📝 Found \(videosWithPrompts.count) videos with prompts out of \(folderVideos.count) total")
                         
                         // Generate new videos using folder-specific generation
+                        print("🎨 Starting folder-specific video generation")
                         let videoIds = try await VideoGenerator.shared.generateFolderVideos(
                             likedVideos: videosWithPrompts,
                             profile: profile
                         )
+                        print("✅ Generated \(videoIds.count) new videos: \(videoIds)")
                         
                         await MainActor.run {
+                            print("🔄 Updating UI with generated videos")
                             self.generatedVideoIds = videoIds
                             self.isGenerating = false
                             self.showingGeneratedVideos = true
+                            print("🎯 Set showingGeneratedVideos to true")
                         }
                         return
                     } else {
+                        print("⏳ Profile not loaded, attempt \(attempt + 1)/3")
                         // Wait a bit before retrying
                         try await Task.sleep(nanoseconds: UInt64(1_000_000_000 * Double(attempt + 1)))
                     }
                 }
                 
                 // If we get here, we failed to get the profile after retries
+                print("❌ Failed to load profile after 3 attempts")
                 await MainActor.run {
                     self.profileLoadError = "Could not load user profile. Please try again."
                     self.isGenerating = false
                 }
             } catch {
-                print("Error generating videos: \(error)")
+                print("❌ Error generating videos: \(error)")
                 await MainActor.run {
                     self.profileLoadError = "Error generating videos: \(error.localizedDescription)"
                     self.isGenerating = false
@@ -209,14 +218,20 @@ struct VideoSwiperView: View {
     @State private var isDismissing = false  // Add this state variable
     
     private var currentVideoId: String? {
-        guard currentIndex < generatedVideoIds.count else { return nil }
+        guard currentIndex < generatedVideoIds.count else { 
+            print("⚠️ Current index \(currentIndex) exceeds video count \(generatedVideoIds.count)")
+            return nil 
+        }
         let id = generatedVideoIds[currentIndex]
         print("📺 Current video ID: \(id) at index \(currentIndex)")
         return id
     }
     
     private var nextVideoId: String? {
-        guard currentIndex + 1 < generatedVideoIds.count else { return nil }
+        guard currentIndex + 1 < generatedVideoIds.count else { 
+            print("⚠️ Next index \(currentIndex + 1) exceeds video count \(generatedVideoIds.count)")
+            return nil 
+        }
         let id = generatedVideoIds[currentIndex + 1]
         print("⏭️ Next video ID: \(id) at index \(currentIndex + 1)")
         return id
@@ -436,15 +451,10 @@ struct VideoSwiperView: View {
                             }
                         }
                     }
-                }
-                
-                // No more videos text - only show when truly at the end
-                if currentIndex >= generatedVideoIds.count {
-                    Text("No more videos")
-                        .foregroundColor(.secondary)
+                } else {
+                    Text("No videos to display")
+                        .foregroundColor(.white)
                         .padding(.top, 60)
-                        .opacity(isDismissing ? 0 : 1)
-                        .animation(.easeOut(duration: 0.2), value: isDismissing)
                 }
             }
             .onChange(of: currentIndex) { newIndex in
@@ -476,6 +486,7 @@ struct VideoSwiperView: View {
             print("🎬 VideoSwiperView appeared")
             print("📊 Total videos: \(generatedVideoIds.count)")
             print("🎯 Starting index: \(currentIndex)")
+            print("🎥 Video IDs: \(generatedVideoIds)")
             
             // Start preloading from the first video
             preloadNextVideos(from: currentIndex)
